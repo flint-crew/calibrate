@@ -38,8 +38,8 @@ public:
 		_availableBufferLane(_laneSize),
 		_startRow(0),
 		_endRow(ms.nrow()),
-        _startScan(-1),
-        _endScan(-1),
+        _startScan(SIZE_MAX),
+        _endScan(SIZE_MAX),
     	_threadCount(threadCount)
 	{ }
 
@@ -55,8 +55,8 @@ public:
 		_availableBufferLane(_laneSize),
 		_startRow(0),
 		_endRow(ms.nrow()),
-        _startScan(-1),
-        _endScan(-1),
+        _startScan(SIZE_MAX),
+        _endScan(SIZE_MAX),
     	_threadCount(threadCount)
 	{ }
 
