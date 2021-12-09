@@ -19,8 +19,8 @@ public:
 	SolutionApplier() : _preset(false),
 	_inputColumnName(casacore::MeasurementSet::columnName(casacore::MSMainEnums::DATA)),
 	_outputColumnName(casacore::MeasurementSet::columnName(casacore::MSMainEnums::DATA)),
-    _startScan(SIZE_MAX),
-    _endScan(SIZE_MAX)
+    _startScan(-1),
+    _endScan(-1)
 	{
 	}
 	
@@ -179,9 +179,9 @@ public:
 				size_t a1 = ant1Column.get(rowIndex), a2 = ant2Column.get(rowIndex);
                 size_t sn = scanColumn(rowIndex);
                 
-                if(_startScan != SIZE_MAX && sn < _startScan)
+                if(_startScan != -1 && sn < _startScan)
                     continue;
-                if(_endScan != SIZE_MAX && sn > _endScan)
+                if(_endScan != -1 && sn > _endScan)
                     continue;
 				if(a1 != a2) {
 					dataColumn.get(rowIndex, data);
@@ -226,7 +226,7 @@ private:
 	bool _preset;
 	std::complex<double> _presetValues[4];
 	std::string _inputColumnName, _outputColumnName;
-	size_t _startScan, _endScan;
+	int _startScan, _endScan;
 };
 
 #endif

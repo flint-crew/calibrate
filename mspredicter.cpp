@@ -118,9 +118,9 @@ void MSPredicter::ReadThreadFunc()
             sn = scanColumn(rowIndex);
         casacore::MEpoch time = timeColumn(rowIndex);
          // Only calibrate selected scans (if selected)
-        if(_startScan != SIZE_MAX && sn < _startScan)
+        if(_startScan != -1 && sn < _startScan)
             continue;
-        if(_endScan != SIZE_MAX && sn > _endScan)
+        if(_endScan != -1 && sn > _endScan)
             continue;
 //        std::cout << "Processing " << a1 << "-" << a2 << " scan=" << sn << "\n";
         if((a1 != a2))

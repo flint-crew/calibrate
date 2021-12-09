@@ -38,8 +38,8 @@ public:
 		_availableBufferLane(_laneSize),
 		_startRow(0),
 		_endRow(ms.nrow()),
-        _startScan(SIZE_MAX),
-        _endScan(SIZE_MAX),
+        _startScan(-1),
+        _endScan(-1),
     	_threadCount(threadCount)
 	{ }
 
@@ -55,8 +55,8 @@ public:
 		_availableBufferLane(_laneSize),
 		_startRow(0),
 		_endRow(ms.nrow()),
-        _startScan(SIZE_MAX),
-        _endScan(SIZE_MAX),
+        _startScan(-1),
+        _endScan(-1),
     	_threadCount(threadCount)
 	{ }
 
@@ -77,8 +77,8 @@ public:
 	
 	void SetStartRow(size_t startRow) { _startRow = startRow; }
 	void SetEndRow(size_t endRow) { _endRow = endRow; }
-	void SetStartScan(size_t startScan) { _startScan = startScan; }
-	void SetEndScan(size_t endScan) { _endScan = endScan; }
+	void SetStartScan(int startScan) { _startScan = startScan; }
+	void SetEndScan(int endScan) { _endScan = endScan; }
 private:
 	void ReadThreadFunc();
 	void PredictThreadFunc();
@@ -101,7 +101,9 @@ private:
 	std::vector<std::complex<double>*> _buffers;
 	std::unique_ptr<BandData> _bandData;
 	std::string _solutionFile;
-	size_t _startRow, _endRow, _startScan, _endScan, _threadCount;
+	size_t _startRow, _endRow;
+    int _startScan, _endScan;
+    size_t _threadCount;
 };
 
 #endif

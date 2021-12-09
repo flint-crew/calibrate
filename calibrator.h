@@ -99,12 +99,12 @@ public:
 		_solutionInterval = solutionInterval;
 	}
 	
-	void SetStartScan(size_t startScan)
+	void SetStartScan(int startScan)
 	{
 		_startScan = startScan;
 	}
 	
-	void SetEndScan(size_t endScan)
+	void SetEndScan(int endScan)
 	{
 		_endScan = endScan;
 	}
@@ -145,7 +145,9 @@ private:
 	std::string _modelFilename, _solutionFilename, _rhsSolutionFilename, _dataColumnName;
 	Model _model;
 	double _minAccuracy, _stoppingAccuracy;
-	size_t _nIter, _solutionInterval, _threadCount, _startScan, _endScan, _refMode;
+	size_t _nIter, _solutionInterval;
+    int _startScan, _endScan;
+    size_t _threadCount, _refMode;
 	bool _onlyScalar, _onlyDiag, _onlyRotation;
 	double _minUVW, _maxUVW;
 	bool _savePlotFiles, _saveFaradayPlotFiles, _saveCrossTermsPlotFile, _verbose;
