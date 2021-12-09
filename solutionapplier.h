@@ -176,8 +176,9 @@ public:
 			for(size_t rowIndex=intervalRowStart; rowIndex!=intervalRowEnd; ++rowIndex)
 			{
 				// Cross correlation?
-				size_t a1 = ant1Column.get(rowIndex), a2 = ant2Column.get(rowIndex);
-                size_t sn = scanColumn(rowIndex);
+				size_t a1 = ant1Column.get(rowIndex);
+                size_t a2 = ant2Column.get(rowIndex);
+                int sn = scanColumn(rowIndex);
                 
                 if(_startScan != -1 && sn < _startScan)
                     continue;
