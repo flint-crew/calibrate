@@ -112,10 +112,9 @@ void MSPredicter::ReadThreadFunc()
     casacore::MEpoch previousTime = timeColumn(_startRow);
     for(size_t rowIndex=_startRow; rowIndex!=_endRow; ++rowIndex)
     {
-        size_t
-            a1 = ant1Column(rowIndex),
-            a2 = ant2Column(rowIndex),
-            sn = scanColumn(rowIndex);
+        size_t a1 = ant1Column(rowIndex);
+        size_t a2 = ant2Column(rowIndex);
+        int sn = scanColumn(rowIndex);
         casacore::MEpoch time = timeColumn(rowIndex);
          // Only calibrate selected scans (if selected)
         if(_startScan != -1 && sn < _startScan)
