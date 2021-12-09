@@ -26,7 +26,7 @@ int main(int argc, char **argv)
 				"    default: -copy\n";
     } else {
 		size_t argi = 1;
-		size_t startScan = -1, endScan = -1;
+		size_t startScan = SIZE_MAX, endScan = SIZE_MAX;
 		double xx=0.0, xy=0.0, yx=0.0, yy=0.0;
 		bool preset = false, copyData = true;
 		std::string dataColumnName = "DATA";

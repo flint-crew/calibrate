@@ -19,8 +19,8 @@ public:
 	SolutionApplier() : _preset(false),
 	_inputColumnName(casacore::MeasurementSet::columnName(casacore::MSMainEnums::DATA)),
 	_outputColumnName(casacore::MeasurementSet::columnName(casacore::MSMainEnums::DATA)),
-    _startScan(-1),
-    _endScan(-1)
+    _startScan(SIZE_MAX),
+    _endScan(SIZE_MAX)
 	{
 	}
 	
@@ -179,9 +179,9 @@ public:
 				size_t a1 = ant1Column.get(rowIndex), a2 = ant2Column.get(rowIndex);
                 size_t sn = scanColumn(rowIndex);
                 
-                if(_startScan != -1 && sn < _startScan)
+                if(_startScan != SIZE_MAX && sn < _startScan)
                     continue;
-                if(_endScan != -1 && sn > _endScan)
+                if(_endScan != SIZE_MAX && sn > _endScan)
                     continue;
 				if(a1 != a2) {
 					dataColumn.get(rowIndex, data);

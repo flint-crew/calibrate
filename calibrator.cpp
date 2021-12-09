@@ -28,8 +28,8 @@ Calibrator::Calibrator(casacore::MeasurementSet& ms, size_t threadCount) :
     _nIter(1000),
     _solutionInterval(0),
     _threadCount(threadCount),
-    _startScan(-1),
-    _endScan(-1),
+    _startScan(SIZE_MAX),
+    _endScan(SIZE_MAX),
     _refMode(0),
     _onlyScalar(false),
     _onlyDiag(false),
@@ -93,7 +93,7 @@ void Calibrator::Perform()
     std::vector<size_t> timestepRows;
     for(size_t rowIndex=0;rowIndex!=_ms.nrow();++rowIndex)
     {
-        if((_startScan == -1 || scanColumn(rowIndex) >= _startScan) && (_endScan == -1 || scanColumn(rowIndex) <= _endScan))
+        if((_startScan == SIZE_MAX || scanColumn(rowIndex) >= _startScan) && (_endScan == SIZE_MAX || scanColumn(rowIndex) <= _endScan))
         if(timeColumn(rowIndex) != time)
         {
             timestepRows.push_back(rowIndex);
