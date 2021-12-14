@@ -411,7 +411,7 @@ void Calibrator::Perform()
 void Calibrator::threadFunction(ThreadData data)
 {
     boost::mutex::scoped_lock lock(*data.mutex);
-    size_t lastSuccessfulChannel = data.tasks->front();
+//    size_t lastSuccessfulChannel = data.tasks->front();
     while(!data.tasks->empty()) {
         size_t taskIndex = data.tasks->front();
         data.tasks->pop();
@@ -443,11 +443,11 @@ void Calibrator::threadFunction(ThreadData data)
                 {
                     std::cout << "Channel " << taskIndex << " converged (accuracy=" << limit << ") but did not reach stopping accuracy.\n";
                 }
-                lastSuccessfulChannel = taskIndex;
+//                lastSuccessfulChannel = taskIndex;
             }
         }
         else {
-            lastSuccessfulChannel = taskIndex;
+//            lastSuccessfulChannel = taskIndex;
         }
         lock.lock();
 //        if(taskIndex>200)
