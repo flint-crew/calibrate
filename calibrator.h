@@ -136,6 +136,7 @@ private:
 		boost::mutex *mutex;
 		std::queue<size_t> *tasks;
 		std::vector<class CalibrationMethod*> *calMethods;
+        size_t index;
 	};
 	
 	void threadFunction(ThreadData data);

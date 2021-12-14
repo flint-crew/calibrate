@@ -41,6 +41,7 @@ Calibrator::Calibrator(casacore::MeasurementSet& ms, size_t threadCount) :
     _saveCrossTermsPlotFile(false),
     _verbose(false)
 {
+    std::cout << "Calibrator::Calibrator minAccuracy:" << _minAccuracy << "; stoppingAccuracy:" << _stoppingAccuracy << "\n";
 }
 
 void Calibrator::Perform()
@@ -163,7 +164,7 @@ void Calibrator::Perform()
             size_t startChannel = (channelCount * pass) / passCount;
             size_t endChannel = (channelCount * (pass+1)) / passCount;
             size_t partChannelCount = endChannel - startChannel;
-
+            std::cout << "pass = " << pass << "; start=" << startChannel << "; end=" << endChannel << "; count=" << partChannelCount << "\n";
             BandData partBandData(bandData, startChannel, endChannel);
 
             std::vector<CalibrationMethod*> calMethods(partChannelCount);
@@ -271,8 +272,13 @@ void Calibrator::Perform()
                         {
                             modelValues[chIndex+p] = rowData.modelData[chIndex+p];
                             if(flagPtr[chIndex+p] || !selected)
+                            {
 //                                if(weight_column == casa::MSMainEnums::SIGMA_SPECTRUM)
                                 weightsPtr[chIndex+p] = 0.0;
+//                                weightsPtr[chIndex+1] = 0.0;
+//                                weightsPtr[chIndex+2] = 0.0;
+//                                weightsPtr[chIndex+3] = 0.0;
+                            }
                         }
                         calMethods[ch]->AddData(&dataPtr[chIndex], &weightsPtr[chIndex], &modelValues[chIndex], antenna1, antenna2, rowData.timeIndex);
                     }
@@ -294,9 +300,12 @@ void Calibrator::Perform()
                 threadData.mutex = &mutex;
                 threadData.tasks = &tasks;
                 threadData.calMethods = &calMethods;
+                threadData.index = i;
                 threadGroup.add_thread(new boost::thread(&Calibrator::threadFunction, this, threadData));
             }
+            std::cout << "Created thread(s)\n";
             threadGroup.join_all();
+            std::cout << "All threads finished\n";
 
             // Save solutions
             for(size_t ant=0; ant!=antennaCount; ++ant)
@@ -407,8 +416,12 @@ void Calibrator::threadFunction(ThreadData data)
         size_t taskIndex = data.tasks->front();
         data.tasks->pop();
         lock.unlock();
-        if(lastSuccessfulChannel != taskIndex)
-            (*(data.calMethods))[taskIndex]->InitSolutions(*(*(data.calMethods))[lastSuccessfulChannel]);
+// *** len067 : Took out this section as it seems to cause subsequent solutions to fail in some cases. ***
+//        if(lastSuccessfulChannel != taskIndex)
+//        {
+//            std::cout << "Thread " << data.index << " initSolutions last=" << lastSuccessfulChannel << " taskIndex=" << taskIndex << "\n";
+//            (*(data.calMethods))[taskIndex]->InitSolutions(*(*(data.calMethods))[lastSuccessfulChannel]);
+//        }
         size_t iters = _nIter;
         double limit = _stoppingAccuracy;
         (*(data.calMethods))[taskIndex]->Execute(limit, iters);
@@ -445,7 +458,7 @@ void Calibrator::threadFunction(ThreadData data)
 //        }
     
         if(_verbose)
-            std::cout << "Finished calibrating channel " << taskIndex << " in " << iters << " iterations, precision=" << limit << ".\n";
+            std::cout << "Thread " << data.index << " finished calibrating channel " << taskIndex << " in " << iters << " iterations, precision=" << limit << ".\n";
     }
 }
 

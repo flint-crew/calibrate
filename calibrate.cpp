@@ -28,7 +28,6 @@ int main(int argc, char *argv[])
 			minUVW = -1.0,
 			maxUVW = -1.0;
 		size_t threadCount = (size_t) sysconf(_SC_NPROCESSORS_ONLN);
-		
 		while(argv[argi][0] == '-')
 		{
 			std::string param(&argv[argi][1]);
@@ -125,6 +124,8 @@ int main(int argc, char *argv[])
 		}
 		
 		if(argc <= argi + 1) throw std::runtime_error("Incorrect parameters");
+
+		std::cout << "Min Accuracy: " << minAccuracy << "; Stopping Accuracy: " << stopAccuracy << "\n";
 		
 		const char *msName = argv[argi];
 		const char *outName = argv[argi+1];
