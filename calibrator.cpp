@@ -274,10 +274,12 @@ void Calibrator::Perform()
                             if(flagPtr[chIndex+p] || !selected)
                             {
 //                                if(weight_column == casa::MSMainEnums::SIGMA_SPECTRUM)
-                                weightsPtr[chIndex+p] = 0.0;
-//                                weightsPtr[chIndex+1] = 0.0;
-//                                weightsPtr[chIndex+2] = 0.0;
-//                                weightsPtr[chIndex+3] = 0.0;
+//                                weightsPtr[chIndex+p] = 0.0;
+                                // If any one of the instrumental polarisations is flagged then flag everything.
+                                weightsPtr[chIndex] = 0.0;
+                                weightsPtr[chIndex+1] = 0.0;
+                                weightsPtr[chIndex+2] = 0.0;
+                                weightsPtr[chIndex+3] = 0.0;
                             }
                         }
                         calMethods[ch]->AddData(&dataPtr[chIndex], &weightsPtr[chIndex], &modelValues[chIndex], antenna1, antenna2, rowData.timeIndex);
