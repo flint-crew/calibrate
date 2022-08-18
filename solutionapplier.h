@@ -95,8 +95,10 @@ public:
 		
 		casacore::IPosition dataShape = dataColumn.shape(0);
 		unsigned polarizationCount = dataShape[0];
-		if(polarizationCount != 4)
-		  throw std::runtime_error("Should have 4 pols");
+		if(polarizationCount != 4 && polarizationCount !=2)
+		  throw std::runtime_error("Should have 2 or 4 pols");
+        if(polarizationCount ==2)
+            std::cout << "Warning: Found only 2 polarizations - assuming XX/YY only.\n";
 		
 		std::cout << "Counting timesteps... " << std::flush;
 		double time = -1.0;
@@ -141,7 +143,8 @@ public:
 			}
 			if(solutionFile.ChannelCount() != channelCount)
 				throw std::runtime_error("Set and solution file have different number of channels");
-			if(solutionFile.PolarizationCount() != polarizationCount) throw std::runtime_error("Polarization counts do not match");
+//			if(solutionFile.PolarizationCount() != polarizationCount) throw std::runtime_error("Polarization counts do not match");
+			if(solutionFile.PolarizationCount() != 4) throw std::runtime_error("Polarization count not suitable in solution file, need 4 polarizations");
 			if(channelCount%solutionFile.ChannelCount()!=0) throw std::runtime_error("Channel counts do not match");
 			std::cout << " DONE\n";
 		}
@@ -193,15 +196,29 @@ public:
 						std::complex<double>
 						*solA = &values[a1][chFileIndex],
 						*solB = &values[a2][chFileIndex];
-						std::complex<double> dataVals[4] = {
-							dataPtr[0], dataPtr[1], dataPtr[2], dataPtr[3]
-						};
-						applySolution(dataVals, solA, solB);
-						dataPtr[0] = dataVals[0];
-						dataPtr[1] = dataVals[1];
-						dataPtr[2] = dataVals[2];
-						dataPtr[3] = dataVals[3];
-						dataPtr += 4;
+                        if (polarizationCount == 4) {
+    						std::complex<double> dataVals[4] = {
+    							dataPtr[0], dataPtr[1], dataPtr[2], dataPtr[3]
+    						};
+    						applySolution(dataVals, solA, solB);
+    						dataPtr[0] = dataVals[0];
+    						dataPtr[1] = dataVals[1];
+    						dataPtr[2] = dataVals[2];
+    						dataPtr[3] = dataVals[3];
+    						dataPtr += polarizationCount;
+                        } else {
+    						std::complex<double> dataVals[4] = {
+    							dataPtr[0], 0.0, 0.0, dataPtr[1]
+    						};
+    						applySolution(dataVals, solA, solB);
+    						dataPtr[0] = dataVals[0];
+//    						dataPtr[1] = dataVals[1];
+//    						dataPtr[2] = dataVals[2];
+    						dataPtr[1] = dataVals[3];
+    						dataPtr += polarizationCount;
+                            
+                        }
+                        
 					}
 				}
 				outputColumn->put(rowIndex, data);
