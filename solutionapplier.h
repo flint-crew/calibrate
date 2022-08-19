@@ -95,10 +95,12 @@ public:
 		
 		casacore::IPosition dataShape = dataColumn.shape(0);
 		unsigned polarizationCount = dataShape[0];
-		if(polarizationCount != 4 && polarizationCount !=2)
-		  throw std::runtime_error("Should have 2 or 4 pols");
-        if(polarizationCount ==2)
+		if(polarizationCount != 4 && polarizationCount !=2 && polarizationCount !=1)
+		  throw std::runtime_error("Should have 1, 2 or 4 pols");
+        if(polarizationCount == 2)
             std::cout << "Warning: Found only 2 polarizations - assuming XX/YY only.\n";
+        if(polarizationCount == 1)
+            std::cout << "Warning: Found only 1 polarization - assuming XX only.\n";
 		
 		std::cout << "Counting timesteps... " << std::flush;
 		double time = -1.0;
@@ -206,7 +208,7 @@ public:
     						dataPtr[2] = dataVals[2];
     						dataPtr[3] = dataVals[3];
     						dataPtr += polarizationCount;
-                        } else {
+                        } else if (polarizationCount == 2){
     						std::complex<double> dataVals[4] = {
     							dataPtr[0], 0.0, 0.0, dataPtr[1]
     						};
@@ -215,6 +217,16 @@ public:
 //    						dataPtr[1] = dataVals[1];
 //    						dataPtr[2] = dataVals[2];
     						dataPtr[1] = dataVals[3];
+    						dataPtr += polarizationCount;
+                        } else {
+    						std::complex<double> dataVals[4] = {
+    							dataPtr[0], 0.0, 0.0, dataPtr[0]
+    						};
+    						applySolution(dataVals, solA, solB);
+    						dataPtr[0] = dataVals[0];
+//    						dataPtr[1] = dataVals[1];
+//    						dataPtr[2] = dataVals[2];
+//    						dataPtr[1] = dataVals[0];
     						dataPtr += polarizationCount;
                             
                         }
