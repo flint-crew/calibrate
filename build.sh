@@ -1,4 +1,4 @@
-export CONDA_PATH=/usr
+export CONDA_PATH=$HOME/miniconda3
 
 g++ -c predicter.cpp -Wall -std=c++11 -msse2 -O3 -march=native -I$CONDA_PATH/include/casacore -I$CONDA_PATH/include
 g++ -c mspredicter.cpp -Wall -std=c++11 -msse2 -O3 -march=native -I$CONDA_PATH/include/casacore -I$CONDA_PATH/include
