@@ -4,6 +4,7 @@
 #include <complex>
 #include <iostream>
 #include <memory>
+#include <algorithm>
 
 #include <ms/MeasurementSets/MSAntenna.h>
 #include <ms/MeasurementSets/MeasurementSet.h>
@@ -192,6 +193,16 @@ public:
 				if(a1 != a2) {
 					dataColumn.get(rowIndex, data);
 					casacore::Array<complex_t>::contiter dataPtr = data.cbegin();
+					
+					// Handle antenna ordering: ensure a1 <= a2 for consistent baseline indexing
+					// This matches the behavior in VisibilityArray::ValuePtr
+					bool needConjugate = false;
+					if(a1 > a2) {
+						std::cout << "BEEEP Swapping antennas " << a1 << " and " << a2 << "\n";
+						std::swap(a1, a2);
+						needConjugate = true;
+					}
+					
 					for(size_t ch=0; ch!=channelCount; ++ch)
 					{
 						size_t chFileIndex = ch * 4;
@@ -202,7 +213,7 @@ public:
     						std::complex<double> dataVals[4] = {
     							dataPtr[0], dataPtr[1], dataPtr[2], dataPtr[3]
     						};
-    						applySolution(dataVals, solA, solB);
+    						applySolution(dataVals, solA, solB, needConjugate);
     						dataPtr[0] = dataVals[0];
     						dataPtr[1] = dataVals[1];
     						dataPtr[2] = dataVals[2];
@@ -212,7 +223,7 @@ public:
     						std::complex<double> dataVals[4] = {
     							dataPtr[0], 0.0, 0.0, dataPtr[1]
     						};
-    						applySolution(dataVals, solA, solB);
+    						applySolution(dataVals, solA, solB, needConjugate);
     						dataPtr[0] = dataVals[0];
 //    						dataPtr[1] = dataVals[1];
 //    						dataPtr[2] = dataVals[2];
@@ -222,7 +233,7 @@ public:
     						std::complex<double> dataVals[4] = {
     							dataPtr[0], 0.0, 0.0, dataPtr[0]
     						};
-    						applySolution(dataVals, solA, solB);
+    						applySolution(dataVals, solA, solB, needConjugate);
     						dataPtr[0] = dataVals[0];
 //    						dataPtr[1] = dataVals[1];
 //    						dataPtr[2] = dataVals[2];
@@ -246,11 +257,22 @@ public:
 		}
 	}
 private:
-	void applySolution(std::complex<double> *dataVal, const std::complex<double> *solA, const std::complex<double> *solB)
+	void applySolution(std::complex<double> *dataVal, const std::complex<double> *solA, const std::complex<double> *solB, bool needConjugate = false)
 	{
 		std::complex<double> solATimesData[4];
-		Matrix2x2::ATimesB(solATimesData, solA, dataVal);
-		Matrix2x2::ATimesHermB(dataVal, solATimesData, solB);
+		
+		if(needConjugate) {
+			// When a1 > a2 in original data, we swapped the antennas so now:
+			// solA = solution for the originally larger antenna (a2)
+			// solB = solution for the originally smaller antenna (a1)
+			// We need to apply them in reverse order with proper conjugation
+			Matrix2x2::ATimesB(solATimesData, solA, dataVal);  // solB * data
+			Matrix2x2::ATimesHermB(dataVal, solATimesData, solB); // solB * data * solA^H
+		} else {
+			// Standard case: a1 <= a2
+			Matrix2x2::ATimesB(solATimesData, solA, dataVal);  // solA * data
+			Matrix2x2::ATimesHermB(dataVal, solATimesData, solB); // solA * data * solB^H
+		}
 	}
 
 	bool _preset;
