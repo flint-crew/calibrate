@@ -196,7 +196,6 @@ public:
 					
 					// Handle antenna ordering: ensure a1 <= a2 for consistent baseline indexing
 					// This matches the behavior in VisibilityArray::ValuePtr
-					bool needConjugate = false;
 					if(a1 > a2) {
 						std::swap(a1, a2);
 					}
