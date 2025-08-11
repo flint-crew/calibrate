@@ -40,17 +40,18 @@ endif()
 
 # Include directories - use the ones from FindCasacore
 include_directories(${CASACORE_INCLUDE_DIRS})
+include_directories(${CMAKE_SOURCE_DIR}/src)
 
 # Common source files for calibrate and addmodel
 set(COMMON_SOURCES
-    predicter.cpp
-    mspredicter.cpp
-    calibrator.cpp
-    calibrationmethod.cpp
-    polynomialfitter.cpp
-    model/model.cpp
-    nlplfitter.cpp
-    progressbar.cpp
+    src/predicter.cpp
+    src/mspredicter.cpp
+    src/calibrator.cpp
+    src/calibrationmethod.cpp
+    src/polynomialfitter.cpp
+    src/model/model.cpp
+    src/nlplfitter.cpp
+    src/progressbar.cpp
 )
 
 # Create object library for common sources
@@ -62,7 +63,7 @@ set_target_properties(calibrate_common PROPERTIES
 )
 
 # Main calibrate executable
-add_executable(calibrate calibrate.cpp)
+add_executable(calibrate src/calibrate.cpp)
 target_link_libraries(calibrate calibrate_common)
 target_link_libraries(calibrate
     ${GSL_LIBRARY}
@@ -73,7 +74,7 @@ target_link_libraries(calibrate
 )
 
 # Addmodel executable
-add_executable(addmodel addmodel.cpp)
+add_executable(addmodel src/addmodel.cpp)
 target_link_libraries(addmodel calibrate_common)
 target_link_libraries(addmodel
     ${GSL_LIBRARY}
@@ -84,7 +85,7 @@ target_link_libraries(addmodel
 )
 
 # Applysolutions executable (only needs CASA libraries)
-add_executable(applysolutions applysolutions.cpp)
+add_executable(applysolutions src/applysolutions.cpp)
 target_link_libraries(applysolutions
     ${CASACORE_LIBRARIES}
 )
