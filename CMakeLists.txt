@@ -14,36 +14,15 @@ endif()
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -O3")
 set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -march=native")
 
-# Find required packages
-# find_package(PkgConfig REQUIRED)
-
-# Allow users to specify custom prefix path for casacore
-if(DEFINED CMAKE_PREFIX_PATH)
-    list(APPEND CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH})
-endif()
-
-# Find casacore components
-# find_library(CASA_MS_LIBRARY casa_ms)
-# find_library(CASA_TABLES_LIBRARY casa_tables)
-# find_library(CASA_CASA_LIBRARY casa_casa)
-# find_library(CASA_MEASURES_LIBRARY casa_measures)
-
-# find_path(CASA_INCLUDE_DIR casacore/ms/MeasurementSet.h)
-
 # Casacore has a separate CMake file in this directory
 set(CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/CMake)
 set(CASACORE_MAKE_REQUIRED_EXTERNALS_OPTIONAL TRUE)
 find_package(Casacore 3.6 REQUIRED COMPONENTS casa ms tables measures)
 
-
 # Check if casacore was found
-if(NOT CASA_MS_LIBRARY OR NOT CASA_TABLES_LIBRARY OR NOT CASA_CASA_LIBRARY OR NOT CASA_MEASURES_LIBRARY)
-    message(FATAL_ERROR "CASA libraries not found. Please install casacore or specify its location with -DCMAKE_PREFIX_PATH=/path/to/casacore")
+if(NOT CASACORE_FOUND)
+    message(FATAL_ERROR "Casacore not found. Please install casacore or specify its location with -DCMAKE_PREFIX_PATH=/path/to/casacore")
 endif()
-
-# if(NOT CASA_INCLUDE_DIR)
-#     message(FATAL_ERROR "CASA headers not found. Please install casacore or specify its location with -DCMAKE_PREFIX_PATH=/path/to/casacore")
-# endif()
 
 # Find other required libraries
 find_library(GSL_LIBRARY gsl)
@@ -59,8 +38,8 @@ if(NOT BOOST_THREAD_LIBRARY OR NOT BOOST_SYSTEM_LIBRARY)
     message(FATAL_ERROR "Boost libraries not found. Please install boost")
 endif()
 
-# Include directories
-# include_directories(${CASA_INCLUDE_DIR})
+# Include directories - use the ones from FindCasacore
+include_directories(${CASACORE_INCLUDE_DIRS})
 
 # Common source files for calibrate and addmodel
 set(COMMON_SOURCES
@@ -88,10 +67,7 @@ target_link_libraries(calibrate calibrate_common)
 target_link_libraries(calibrate
     ${GSL_LIBRARY}
     ${GSL_CBLAS_LIBRARY}
-    ${CASA_MS_LIBRARY}
-    ${CASA_TABLES_LIBRARY}
-    ${CASA_CASA_LIBRARY}
-    ${CASA_MEASURES_LIBRARY}
+    ${CASACORE_LIBRARIES}
     ${BOOST_THREAD_LIBRARY}
     ${BOOST_SYSTEM_LIBRARY}
 )
@@ -102,10 +78,7 @@ target_link_libraries(addmodel calibrate_common)
 target_link_libraries(addmodel
     ${GSL_LIBRARY}
     ${GSL_CBLAS_LIBRARY}
-    ${CASA_MS_LIBRARY}
-    ${CASA_TABLES_LIBRARY}
-    ${CASA_CASA_LIBRARY}
-    ${CASA_MEASURES_LIBRARY}
+    ${CASACORE_LIBRARIES}
     ${BOOST_THREAD_LIBRARY}
     ${BOOST_SYSTEM_LIBRARY}
 )
@@ -113,10 +86,7 @@ target_link_libraries(addmodel
 # Applysolutions executable (only needs CASA libraries)
 add_executable(applysolutions applysolutions.cpp)
 target_link_libraries(applysolutions
-    ${CASA_MS_LIBRARY}
-    ${CASA_TABLES_LIBRARY}
-    ${CASA_CASA_LIBRARY}
-    ${CASA_MEASURES_LIBRARY}
+    ${CASACORE_LIBRARIES}
 )
 
 # Installation
@@ -128,7 +98,8 @@ install(TARGETS calibrate addmodel applysolutions
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "C++ compiler: ${CMAKE_CXX_COMPILER}")
 message(STATUS "C++ flags: ${CMAKE_CXX_FLAGS}")
-message(STATUS "CASA include dir: ${CASA_INCLUDE_DIR}")
+message(STATUS "Casacore include dirs: ${CASACORE_INCLUDE_DIRS}")
+message(STATUS "Casacore libraries: ${CASACORE_LIBRARIES}")
 message(STATUS "Install prefix: ${CMAKE_INSTALL_PREFIX}")
 
 # Custom target for cleaning object files
