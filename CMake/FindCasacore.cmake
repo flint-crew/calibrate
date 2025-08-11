@@ -1,3 +1,5 @@
+# https://gitlab.com/aroffringa/wsclean/-/blob/master/CMake/FindCasacore.cmake
+# WSclean license included
 # - Try to find Casacore include dirs and libraries
 # Usage:
 #   find_package(Casacore [REQUIRED] [COMPONENTS components...])
