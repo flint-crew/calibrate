@@ -198,9 +198,7 @@ public:
 					// This matches the behavior in VisibilityArray::ValuePtr
 					bool needConjugate = false;
 					if(a1 > a2) {
-						std::cout << "BEEEP Swapping antennas " << a1 << " and " << a2 << "\n";
 						std::swap(a1, a2);
-						needConjugate = true;
 					}
 					
 					for(size_t ch=0; ch!=channelCount; ++ch)
@@ -213,7 +211,7 @@ public:
     						std::complex<double> dataVals[4] = {
     							dataPtr[0], dataPtr[1], dataPtr[2], dataPtr[3]
     						};
-    						applySolution(dataVals, solA, solB, needConjugate);
+    						applySolution(dataVals, solA, solB);
     						dataPtr[0] = dataVals[0];
     						dataPtr[1] = dataVals[1];
     						dataPtr[2] = dataVals[2];
@@ -223,7 +221,7 @@ public:
     						std::complex<double> dataVals[4] = {
     							dataPtr[0], 0.0, 0.0, dataPtr[1]
     						};
-    						applySolution(dataVals, solA, solB, needConjugate);
+    						applySolution(dataVals, solA, solB);
     						dataPtr[0] = dataVals[0];
 //    						dataPtr[1] = dataVals[1];
 //    						dataPtr[2] = dataVals[2];
@@ -233,7 +231,7 @@ public:
     						std::complex<double> dataVals[4] = {
     							dataPtr[0], 0.0, 0.0, dataPtr[0]
     						};
-    						applySolution(dataVals, solA, solB, needConjugate);
+    						applySolution(dataVals, solA, solB);
     						dataPtr[0] = dataVals[0];
 //    						dataPtr[1] = dataVals[1];
 //    						dataPtr[2] = dataVals[2];
@@ -257,22 +255,13 @@ public:
 		}
 	}
 private:
-	void applySolution(std::complex<double> *dataVal, const std::complex<double> *solA, const std::complex<double> *solB, bool needConjugate = false)
+	void applySolution(std::complex<double> *dataVal, const std::complex<double> *solA, const std::complex<double> *solB)
 	{
 		std::complex<double> solATimesData[4];
-		
-		if(needConjugate) {
-			// When a1 > a2 in original data, we swapped the antennas so now:
-			// solA = solution for the originally larger antenna (a2)
-			// solB = solution for the originally smaller antenna (a1)
-			// We need to apply them in reverse order with proper conjugation
-			Matrix2x2::ATimesB(solATimesData, solA, dataVal);  // solB * data
-			Matrix2x2::ATimesHermB(dataVal, solATimesData, solB); // solB * data * solA^H
-		} else {
-			// Standard case: a1 <= a2
-			Matrix2x2::ATimesB(solATimesData, solA, dataVal);  // solA * data
-			Matrix2x2::ATimesHermB(dataVal, solATimesData, solB); // solA * data * solB^H
-		}
+
+		Matrix2x2::ATimesB(solATimesData, solA, dataVal);  // solA * data
+		Matrix2x2::ATimesHermB(dataVal, solATimesData, solB); // solA * data * solB^H
+
 	}
 
 	bool _preset;
