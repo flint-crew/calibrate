@@ -67,3 +67,5 @@ CMakeUserPresets.json
 .vscode/c_cpp_properties.json
 
 build/*
+.DS_Store
+.vscode/launch.json
