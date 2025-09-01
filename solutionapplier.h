@@ -4,6 +4,7 @@
 #include <complex>
 #include <iostream>
 #include <memory>
+#include <algorithm>
 
 #include <ms/MeasurementSets/MSAntenna.h>
 #include <ms/MeasurementSets/MeasurementSet.h>
@@ -192,6 +193,13 @@ public:
 				if(a1 != a2) {
 					dataColumn.get(rowIndex, data);
 					casacore::Array<complex_t>::contiter dataPtr = data.cbegin();
+					
+					// Handle antenna ordering: ensure a1 <= a2 for consistent baseline indexing
+					// This matches the behavior in VisibilityArray::ValuePtr
+					if(a1 > a2) {
+						std::swap(a1, a2);
+					}
+					
 					for(size_t ch=0; ch!=channelCount; ++ch)
 					{
 						size_t chFileIndex = ch * 4;
@@ -249,8 +257,10 @@ private:
 	void applySolution(std::complex<double> *dataVal, const std::complex<double> *solA, const std::complex<double> *solB)
 	{
 		std::complex<double> solATimesData[4];
-		Matrix2x2::ATimesB(solATimesData, solA, dataVal);
-		Matrix2x2::ATimesHermB(dataVal, solATimesData, solB);
+
+		Matrix2x2::ATimesB(solATimesData, solA, dataVal);  // solA * data
+		Matrix2x2::ATimesHermB(dataVal, solATimesData, solB); // solA * data * solB^H
+
 	}
 
 	bool _preset;
