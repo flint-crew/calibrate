@@ -66,6 +66,8 @@ These tools perform "MitchCal":
 
 > a direction-independent full-polarization self-calibration. This is performed with the mitchcal tool, which is the authors’ custom implementation of the algorithm described by Mitchell et al. (2008)
 
+In the current form of this repo, only a single time-step, frequency dependent solution is computed. This is suitable for a bandpass calibration.
+
 The CLI hooks are:
 
 ```bash
@@ -74,14 +76,18 @@ calibrate
 
 # This will calculate "static" phase offsets for all stations. It produces approximate least-squares solutions.
 # refmode=0 process all baselines; =1 only include baselines to reference antenna; =2 exclude baselines to reference antenna.
+```
 
+```bash
 applysolutions
 # Usage: applysolutions [-datacolumn <name>] [-gflag <solutions-flag-file.txt>] [-startscan <scan>] [-endscan <scan>] [-copy/-nocopy] [-s xx xy yx yy] <ms> <gains-bin-file>
 # Will apply the found solution matrices.
 # Options:
 #   -copy/-nocopy Don't(/do) alter the original DATA column but store the corrected data in the CORRECTED_DATA (this is std CASA behaviour)
 #     default: -copy
+```
 
+```bash
 addmodel
 # Usage: addmodel [-usemodelcol] [-datacolumn <COLUMN>] [-m <a|s|c|z>] [-n <σ>] <model> <ms>
 # Modify visibilities using a model. If -usemodelcol is specified then the MODEL_DATA column is used as the source model otherwise the specified component model file is used. The modification to use is defined with the mode switch(-m) where a=add model to visibilities (default), s=subtract model from visibilities, c=copy model to visibilities, z=zero visibilities.
