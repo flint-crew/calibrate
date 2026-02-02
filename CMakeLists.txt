@@ -28,13 +28,12 @@ endif()
 find_library(GSL_LIBRARY gsl)
 find_library(GSL_CBLAS_LIBRARY gslcblas)
 find_library(BOOST_THREAD_LIBRARY boost_thread)
-find_library(BOOST_SYSTEM_LIBRARY boost_system)
 
 if(NOT GSL_LIBRARY OR NOT GSL_CBLAS_LIBRARY)
     message(FATAL_ERROR "GSL libraries not found. Please install gsl")
 endif()
 
-if(NOT BOOST_THREAD_LIBRARY OR NOT BOOST_SYSTEM_LIBRARY)
+if(NOT BOOST_THREAD_LIBRARY)
     message(FATAL_ERROR "Boost libraries not found. Please install boost")
 endif()
 
@@ -70,7 +69,6 @@ target_link_libraries(calibrate
     ${GSL_CBLAS_LIBRARY}
     ${CASACORE_LIBRARIES}
     ${BOOST_THREAD_LIBRARY}
-    ${BOOST_SYSTEM_LIBRARY}
 )
 
 # Addmodel executable
@@ -81,7 +79,6 @@ target_link_libraries(addmodel
     ${GSL_CBLAS_LIBRARY}
     ${CASACORE_LIBRARIES}
     ${BOOST_THREAD_LIBRARY}
-    ${BOOST_SYSTEM_LIBRARY}
 )
 
 # Applysolutions executable (only needs CASA libraries)
