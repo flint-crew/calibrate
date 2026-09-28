@@ -48,10 +48,10 @@ solutions and corrected data.
 | File | Checks |
 | --- | --- |
 | `test_aosolutions.py` | The `.bin` solutions format, read with Flint's reader; applying real Flint solution files |
-| `test_calibrate.py` | Known Jones matrices are recovered (full-Jones, `-diag`, `-t`, noisy data); `applysolutions` restores the model for 4, 2 and 1 polarisations |
+| `test_calibrate.py` | Known Jones matrices are recovered (full-Jones, `-diag`, `-t`, `-ch`, `-interval`, `-absmem`, noisy data); weighting and `-weightcolumn`; `applysolutions` restores the model for 4, 2 and 1 polarisations, including autocorrelations |
 | `test_addmodel.py` | The add, subtract, copy and zero modes, and creating a new column |
-| `test_regression.py` | Byte-identical output against `BASELINE_BIN_DIR` for all existing options |
-| `test_known_issues.py` | Known bugs, marked `xfail(strict=True)` until they are fixed |
+| `test_regression.py` | Same output as `BASELINE_BIN_DIR` for all existing options (byte-identical with `REGRESSION_EXACT=1`, see the module docstring) |
+| `test_reversed_baselines.py` | Rows with ANTENNA1 > ANTENNA2: what is handled correctly, and the known limitations as `xfail(strict=True)` |
 
 ## Test data
 

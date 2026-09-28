@@ -566,7 +566,8 @@ def gain_product_error(
         exclude (set[int] | None, optional): Antennas to leave out. Defaults to None.
 
     Returns:
-        np.ndarray: Median absolute deviation from identity per channel, shape (nchan,)
+        np.ndarray: Per channel, the median over baselines of the largest
+            deviation from identity of the four terms, shape (nchan,)
     """
     keep = ant1 != ant2
     if exclude:
@@ -584,4 +585,7 @@ def gain_product_error(
         ant1,
         ant2,
     )
-    return np.median(np.abs(corrected - identity), axis=(0, 2))
+    # Worst of the four terms per baseline, so the (zero) off-diagonal terms of
+    # diagonal gains can not hide an error in the diagonal
+    worst = np.max(np.abs(corrected - identity), axis=2)
+    return np.median(worst, axis=0)
