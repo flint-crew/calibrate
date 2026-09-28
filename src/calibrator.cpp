@@ -49,6 +49,19 @@ Calibrator::Calibrator(casacore::MeasurementSet& ms, size_t threadCount) :
     std::cout << "Calibrator::Calibrator minAccuracy:" << _minAccuracy << "; stoppingAccuracy:" << _stoppingAccuracy << "\n";
 }
 
+namespace {
+    /** Replaces the 2x2 matrix (XX, XY, YX, YY) by its conjugate transpose. */
+    template<typename T>
+    void conjugateTranspose(std::complex<T>* values)
+    {
+        const std::complex<T> xy = values[1];
+        values[0] = std::conj(values[0]);
+        values[1] = std::conj(values[2]);
+        values[2] = std::conj(xy);
+        values[3] = std::conj(values[3]);
+    }
+}
+
 casacore::MSMainEnums::PredefinedColumns Calibrator::selectWeightColumn() const
 {
     const casacore::MSMainEnums::PredefinedColumns candidates[] = {
@@ -374,6 +387,12 @@ void Calibrator::Perform()
                     else
                         notSelected++;
 
+                    // The solver stores each baseline once, as (lower antenna,
+                    // higher antenna). A row stored the other way round holds
+                    // V_21 = V_12^H, so turn its data and model into V_12.
+                    const bool reversed = antenna1 > antenna2;
+                    const size_t lowAntenna = reversed ? antenna2 : antenna1;
+                    const size_t highAntenna = reversed ? antenna1 : antenna2;
                     for(size_t ch = 0; ch!=partChannelCount; ++ch)
                     {
                         size_t chIndex = (ch + startChannel) * 4;
@@ -391,9 +410,15 @@ void Calibrator::Perform()
                                 weightsPtr[chIndex+3] = 0.0;
                             }
                         }
+                        if(reversed)
+                        {
+                            conjugateTranspose(&dataPtr[chIndex]);
+                            conjugateTranspose(&modelValues[chIndex]);
+                            std::swap(weightsPtr[chIndex+1], weightsPtr[chIndex+2]);
+                        }
                         const size_t cb = blockOfChannel[ch + startChannel];
                         const size_t channelInBlock = ch + startChannel - cb*channelCount/chBlockCount;
-                        calMethods[cb - startBlock]->AddData(&dataPtr[chIndex], &weightsPtr[chIndex], &modelValues[chIndex], antenna1, antenna2, channelInBlock * timestepsInInterval + rowData.timeIndex);
+                        calMethods[cb - startBlock]->AddData(&dataPtr[chIndex], &weightsPtr[chIndex], &modelValues[chIndex], lowAntenna, highAntenna, channelInBlock * timestepsInInterval + rowData.timeIndex);
                     }
                 }
                 

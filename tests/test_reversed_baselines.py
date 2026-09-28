@@ -1,15 +1,15 @@
 """Rows stored with ANTENNA1 > ANTENNA2.
 
-``VisibilityArray::ValuePtr`` files every baseline under (smaller antenna,
-larger antenna) without conjugating the data or model, so a reversed row's
-V_qp = V_pq^H is solved as if it were V_pq. Flint PR #1 ("Correct flips")
-made applysolutions swap the antennas of reversed rows in the same way.
+A row stored as (p, q) with p > q holds V_pq = V_qp^H. calibrate turns such
+rows into V_qp (data and model conjugate-transposed) before solving, and
+applysolutions corrects every row as S_a1 V S_a2^H with its own antennas. So
+the row order of a measurement set does not change the solutions.
 
-For a measurement set where every row is reversed, with diagonal gains and
-an unpolarised model (the bandpass case), this is self consistent: calibrate
-solves for conj(J), and applysolutions undoes it, so the corrected data is
-right. It is not right for leakage terms, or for a measurement set that mixes
-both orders. These tests record what works and what does not.
+Before this was fixed, reversed rows were solved as if they were V_qp, and
+applysolutions (Flint PR #1) swapped their antennas to match. That was only
+self consistent for an MS with every row reversed, diagonal gains and an
+unpolarised model, and even then the solutions were conj(J)^-1. Leakage and
+MSs with both orders were solved wrongly. Each test here fails on that code.
 """
 
 from __future__ import annotations
@@ -57,78 +57,60 @@ def _gain_error(solutions: np.ndarray, jones: np.ndarray, ms_path: Path) -> floa
     return float(np.max(msgen.gain_product_error(solutions, jones, ant1, ant2)))
 
 
+@pytest.mark.parametrize("every_row", [True, False], ids=["all_reversed", "mixed"])
 @pytest.mark.parametrize(
-    "kwargs",
+    "diagonal, kwargs",
     [
-        {"extra": ["-diag"]},
-        {},
-        {"model": None, "extra": ["-diag"]},
+        (True, {"extra": ["-diag"]}),
+        (True, {}),
+        (False, {}),
+        (False, {"model": None}),
     ],
-    ids=["diag", "full_jones_solve", "model_data_column"],
+    ids=["diag", "diag_gains_full_solve", "leakage", "leakage_model_data_column"],
 )
-def test_all_reversed_diagonal_gains_are_corrected(
-    cal_ms_factory, bins, tmpdir, kwargs
+def test_reversed_rows_are_calibrated(
+    cal_ms_factory, bins, tmpdir, every_row, diagonal, kwargs
 ):
-    """Every row reversed, diagonal gains: the corrected data is right.
-
-    The solutions are the inverse of conj(J), not of J: their phases have the
-    opposite sign to the same data stored in the usual order.
-    """
-    ms_path, truth = cal_ms_factory(diagonal=True)
-    _reverse(ms_path, every_row=True)
+    """Reversed rows recover the true gains, and are corrected, like normal rows"""
+    ms_path, truth = cal_ms_factory(diagonal=diagonal)
+    _reverse(ms_path, every_row=every_row)
     solutions = _calibrate_and_apply(bins, ms_path, tmpdir, **kwargs)
 
-    error = _corrected_error(ms_path)
-    assert np.median(error) < MEDIAN_TOLERANCE
-    assert np.max(error) < WORST_BASELINE_TOLERANCE
-    assert _gain_error(solutions, np.conj(truth.jones), ms_path) < GAIN_TOLERANCE
-    assert _gain_error(solutions, truth.jones, ms_path) > 0.5
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="Reversed rows are solved without conjugating them, so solutions "
-    "for an all-reversed MS are conj(J)^-1 rather than J^-1",
-)
-def test_all_reversed_solutions_follow_physical_convention(
-    cal_ms_factory, bins, tmpdir
-):
-    """The same sky and gains give the same solutions whatever the row order"""
-    ms_path, truth = cal_ms_factory(diagonal=True)
-    _reverse(ms_path, every_row=True)
-    solutions = _calibrate_and_apply(bins, ms_path, tmpdir, extra=["-diag"])
-
-    assert _gain_error(solutions, truth.jones, ms_path) < GAIN_TOLERANCE
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="With every row reversed the XY and YX terms are swapped, so "
-    "leakage can not be solved",
-)
-def test_all_reversed_leakage_is_corrected(cal_ms_factory, bins, tmpdir):
-    """Every row reversed, full-Jones gains with leakage"""
-    ms_path, _ = cal_ms_factory()
-    _reverse(ms_path, every_row=True)
-    _calibrate_and_apply(bins, ms_path, tmpdir)
-
-    error = _corrected_error(ms_path)
-    assert np.median(error) < MEDIAN_TOLERANCE
-    assert np.max(error) < WORST_BASELINE_TOLERANCE
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="Reversed rows claim the opposite phase difference to normal rows, "
-    "so an MS with both orders can not be solved",
-)
-def test_mixed_order_is_corrected(cal_ms_factory, bins, tmpdir):
-    """Half the rows reversed, diagonal gains"""
-    ms_path, _ = cal_ms_factory(diagonal=True)
-    _reverse(ms_path, every_row=False)
-    solutions = _calibrate_and_apply(bins, ms_path, tmpdir, extra=["-diag"])
-
     assert np.all(np.isfinite(solutions))
+    assert _gain_error(solutions, truth.jones, ms_path) < GAIN_TOLERANCE
     error = _corrected_error(ms_path)
+    assert np.median(error) < MEDIAN_TOLERANCE
+    assert np.max(error) < WORST_BASELINE_TOLERANCE
+
+
+def test_row_order_does_not_change_solutions(cal_ms_factory, bins, tmpdir):
+    """The same data in either row order gives the same solutions"""
+    normal_ms, _ = cal_ms_factory(name="normal")
+    reversed_ms, _ = cal_ms_factory(name="reversed")
+    _reverse(reversed_ms, every_row=True)
+
+    solutions = {}
+    for label, ms_path in (("normal", normal_ms), ("reversed", reversed_ms)):
+        sol_path = Path(tmpdir) / f"{label}.bin"
+        run(bins.calibrate, calibrate_args(ms_path, sol_path))
+        solutions[label] = AOSolutions.load(sol_path).bandpass
+
+    np.testing.assert_allclose(
+        solutions["reversed"], solutions["normal"], rtol=1e-5, atol=1e-6
+    )
+
+
+@pytest.mark.parametrize("every_row", [True, False], ids=["all_reversed", "mixed"])
+def test_solutions_transfer_between_row_orders(cal_ms_factory, bins, tmpdir, every_row):
+    """Solutions from a normally ordered MS correct a reversed copy of it"""
+    normal_ms, _ = cal_ms_factory(name="normal")
+    sol_path = Path(tmpdir) / "normal.bin"
+    run(bins.calibrate, calibrate_args(normal_ms, sol_path))
+
+    reversed_ms, _ = cal_ms_factory(name="reversed")
+    _reverse(reversed_ms, every_row=every_row)
+    run(bins.applysolutions, applysolutions_args(reversed_ms, sol_path))
+
+    error = _corrected_error(reversed_ms)
     assert np.median(error) < MEDIAN_TOLERANCE
     assert np.max(error) < WORST_BASELINE_TOLERANCE

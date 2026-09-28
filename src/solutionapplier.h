@@ -234,11 +234,8 @@ public:
 					dataColumn.get(rowIndex, data);
 					casacore::Array<complex_t>::contiter dataPtr = data.cbegin();
 					
-					// Handle antenna ordering: ensure a1 <= a2 for consistent baseline indexing
-					// This matches the behavior in VisibilityArray::ValuePtr
-					if(a1 > a2) {
-						std::swap(a1, a2);
-					}
+					// A row is corrected as S_a1 V S_a2^H with its own antennas, also
+					// when ANTENNA1 > ANTENNA2 (calibrate conjugates such rows itself)
 					
 					for(size_t ch=0; ch!=channelCount; ++ch)
 					{

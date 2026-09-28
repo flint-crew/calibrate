@@ -51,7 +51,7 @@ solutions and corrected data.
 | `test_calibrate.py` | Known Jones matrices are recovered (full-Jones, `-diag`, `-t`, `-ch`, `-interval`, `-absmem`, noisy data); weighting and `-weightcolumn`; `applysolutions` restores the model for 4, 2 and 1 polarisations, including autocorrelations |
 | `test_addmodel.py` | The add, subtract, copy and zero modes, and creating a new column |
 | `test_regression.py` | Same output as `BASELINE_BIN_DIR` for all existing options (byte-identical with `REGRESSION_EXACT=1`, see the module docstring) |
-| `test_reversed_baselines.py` | Rows with ANTENNA1 > ANTENNA2: what is handled correctly, and the known limitations as `xfail(strict=True)` |
+| `test_reversed_baselines.py` | Rows with ANTENNA1 > ANTENNA2, alone or mixed with normal rows: same solutions and corrections as normally ordered data |
 
 ## Test data
 
