@@ -63,6 +63,16 @@ public:
 		_dataColumnName = dataColumnName;
 	}
 	
+	/**
+	 * Column to read the weights from. An empty name selects automatically:
+	 * WEIGHT_SPECTRUM, then WEIGHT, then SIGMA_SPECTRUM, then SIGMA. The
+	 * SIGMA columns are converted to weights as 1/sigma^2.
+	 */
+	void SetWeightColumnName(const std::string& weightColumnName)
+	{
+		_weightColumnName = weightColumnName;
+	}
+	
 	void SetRHSSolutionFile(const std::string& rhsSolutionFile)
 	{
 		_rhsSolutionFilename = rhsSolutionFile;
@@ -140,10 +150,13 @@ private:
 	};
 	
 	void threadFunction(ThreadData data);
+	
+	/** Selects which column the weights are read from, see SetWeightColumnName(). */
+	casacore::MSMainEnums::PredefinedColumns selectWeightColumn() const;
 
 	casacore::MeasurementSet _ms;
 	SolutionFile _solutionFile;
-	std::string _modelFilename, _solutionFilename, _rhsSolutionFilename, _dataColumnName;
+	std::string _modelFilename, _solutionFilename, _rhsSolutionFilename, _dataColumnName, _weightColumnName;
 	Model _model;
 	double _minAccuracy, _stoppingAccuracy;
 	size_t _nIter, _solutionInterval;

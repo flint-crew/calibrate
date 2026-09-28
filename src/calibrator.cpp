@@ -44,6 +44,45 @@ Calibrator::Calibrator(casacore::MeasurementSet& ms, size_t threadCount) :
     std::cout << "Calibrator::Calibrator minAccuracy:" << _minAccuracy << "; stoppingAccuracy:" << _stoppingAccuracy << "\n";
 }
 
+casacore::MSMainEnums::PredefinedColumns Calibrator::selectWeightColumn() const
+{
+    const casacore::MSMainEnums::PredefinedColumns candidates[] = {
+        casacore::MSMainEnums::WEIGHT_SPECTRUM,
+        casacore::MSMainEnums::WEIGHT,
+        casacore::MSMainEnums::SIGMA_SPECTRUM,
+        casacore::MSMainEnums::SIGMA
+    };
+    const casacore::TableDesc& tableDesc = _ms.tableDesc();
+    if(!_weightColumnName.empty())
+    {
+        for(casacore::MSMainEnums::PredefinedColumns column : candidates)
+        {
+            const std::string name = _ms.columnName(column);
+            if(name == _weightColumnName)
+            {
+                if(!tableDesc.isColumn(_weightColumnName))
+                    throw std::runtime_error("Weight column " + _weightColumnName + " does not exist");
+                return column;
+            }
+        }
+        throw std::runtime_error("Unsupported weight column " + _weightColumnName +
+            ": use WEIGHT_SPECTRUM, WEIGHT, SIGMA_SPECTRUM or SIGMA");
+    }
+    for(casacore::MSMainEnums::PredefinedColumns column : candidates)
+    {
+        const std::string name = _ms.columnName(column);
+        if(!tableDesc.isColumn(name))
+            continue;
+        // Some writers add a spectrum column without filling it
+        const bool isSpectrum = column == casacore::MSMainEnums::WEIGHT_SPECTRUM ||
+            column == casacore::MSMainEnums::SIGMA_SPECTRUM;
+        if(isSpectrum && !casacore::ROArrayColumn<float>(_ms, name).isDefined(0))
+            continue;
+        return column;
+    }
+    throw std::runtime_error("Measurement set has no WEIGHT or SIGMA column");
+}
+
 void Calibrator::Perform()
 {
     if(_verbose)
@@ -67,21 +106,26 @@ void Calibrator::Perform()
     casacore::ROArrayColumn<bool> flagColumn(_ms, _ms.columnName(casacore::MSMainEnums::FLAG));
     casacore::ROScalarColumn<int> scanColumn(_ms, _ms.columnName(casacore::MSMainEnums::SCAN_NUMBER)); // Check for scan number
     
-    // Use SIGMA_SPECTRUM if available, otherwise use SIGMA
-    casacore::MSMainEnums::PredefinedColumns weight_column = casacore::MSMainEnums::SIGMA_SPECTRUM;
-    if(!_ms.tableDesc().isColumn("SIGMA_SPECTRUM"))
-    {
-        std::cout << "No SIGMA_SPECTRUM column found, using SIGMA instead" << std::endl;
-        weight_column = casacore::MSMainEnums::SIGMA;
-    }
-    else
-    {
-        std::cout << "Using SIGMA_SPECTRUM column for weights" << std::endl;
-    }
+    // Weights come from WEIGHT_SPECTRUM, WEIGHT, SIGMA_SPECTRUM or SIGMA (see
+    // selectWeightColumn()). SIGMA values are converted to weights as 1/sigma^2.
+    const casacore::MSMainEnums::PredefinedColumns weight_column = selectWeightColumn();
+    const bool weightIsSpectrum =
+        weight_column == casacore::MSMainEnums::WEIGHT_SPECTRUM ||
+        weight_column == casacore::MSMainEnums::SIGMA_SPECTRUM;
+    const bool weightIsSigma =
+        weight_column == casacore::MSMainEnums::SIGMA_SPECTRUM ||
+        weight_column == casacore::MSMainEnums::SIGMA;
+    std::cout << "Using " << _ms.columnName(weight_column) << " column for weights"
+        << (weightIsSigma ? " (weight = 1/sigma^2)" : "") << std::endl;
     casacore::ROArrayColumn<float> weightColumn(_ms, _ms.columnName(weight_column));
+    // Rows without a WEIGHT_SPECTRUM (SIGMA_SPECTRUM) cell use WEIGHT (SIGMA)
+    std::unique_ptr<casacore::ROArrayColumn<float>> rowWeightColumn;
+    if(weightIsSpectrum)
+        rowWeightColumn.reset(new casacore::ROArrayColumn<float>(_ms, _ms.columnName(
+            weightIsSigma ? casacore::MSMainEnums::SIGMA : casacore::MSMainEnums::WEIGHT)));
     
-    casacore::IPosition weightShape = weightColumn.shape(0);
     casacore::IPosition dataShape = dataColumn.shape(0);
+    casacore::IPosition weightShape(1, dataShape[0]);
     
     unsigned polarizationCount = dataShape[0];
 
@@ -227,14 +271,17 @@ void Calibrator::Perform()
                 {
                     boost::mutex::scoped_lock lock(predicter->IOMutex());
                     dataColumn.get(rowIndex, data);
-                    // If using SIGMA_SPECTRUM then have a weight per channel
-                    if(weight_column == casacore::MSMainEnums::SIGMA_SPECTRUM)
+                    // A spectrum column has a weight per channel
+                    if(weightIsSpectrum && weightColumn.isDefined(rowIndex))
                         weightColumn.get(rowIndex, weights);
                     else
                     {
-                        // If using SIGMA then have to copy weight across for each channel.
+                        // Otherwise copy the per polarization weight across each channel.
                         casacore::Array<float> vweights(weightShape);
-                        weightColumn.get(rowIndex, vweights);
+                        if(weightIsSpectrum)
+                            rowWeightColumn->get(rowIndex, vweights);
+                        else
+                            weightColumn.get(rowIndex, vweights);
                         float *weightscPtr = weights.cbegin();
                         float *vweightsPtr = vweights.cbegin();
                         for(size_t ch = 0; ch!=partChannelCount; ++ch)
@@ -252,6 +299,15 @@ void Calibrator::Perform()
                     std::complex<float> *dataPtr = data.cbegin();
                     float *weightsPtr = weights.cbegin();
                     bool *flagPtr = flags.cbegin();
+
+                    for(size_t i = startChannel * 4; i != endChannel * 4; ++i)
+                    {
+                        float &weight = weightsPtr[i];
+                        if(!std::isfinite(weight) || weight <= 0.0)
+                            weight = 0.0;
+                        else if(weightIsSigma)
+                            weight = 1.0 / (weight * weight);
+                    }
 
                     double u = rowData.u;
                     double v = rowData.v;

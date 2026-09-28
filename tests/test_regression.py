@@ -2,8 +2,16 @@
 
 Set ``BASELINE_BIN_DIR`` to a build of the reference version (normally
 ``main``) to run these tests. Every existing command line option must give
-byte-identical solutions and identical corrected visibilities, which is how
-we make sure a change can not break the pipeline.
+the same solutions and corrected visibilities, which is how we make sure a
+change can not break the pipeline.
+
+By default values must agree to within rounding (relative 1e-10 for the
+double precision solutions, 1e-6 for float visibilities) and NaNs must be in
+the same places. The build uses ``-march=native``, which lets the compiler
+fuse multiply-adds differently whenever a file changes, so bit-for-bit output
+is only reproducible with contraction turned off. Build both versions with
+``-DCMAKE_CXX_FLAGS=-ffp-contract=off`` and set ``REGRESSION_EXACT=1`` to
+require byte-identical files instead.
 
 The measurement sets here have unit weights, so the weighting fixes are not
 expected to change anything. Autocorrelation rows are left out of the
@@ -13,6 +21,7 @@ them (see ``test_known_issues.py``).
 
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
@@ -20,6 +29,7 @@ import numpy as np
 import pytest
 
 from tests import msgen
+from tests.aosolutions import HEADER_SIZE, AOSolutions
 from tests.runner import (
     Binaries,
     addmodel_args,
@@ -27,6 +37,49 @@ from tests.runner import (
     calibrate_args,
     run,
 )
+
+EXACT = os.environ.get("REGRESSION_EXACT", "0") == "1"
+
+
+def assert_solutions_match(new: Path, old: Path) -> None:
+    """Two solution files hold the same solutions"""
+    if EXACT:
+        assert new.read_bytes() == old.read_bytes()
+        return
+    assert new.read_bytes()[:HEADER_SIZE] == old.read_bytes()[:HEADER_SIZE]
+    np.testing.assert_allclose(
+        AOSolutions.load(new).bandpass,
+        AOSolutions.load(old).bandpass,
+        rtol=1e-10,
+        atol=1e-12,
+    )
+
+
+def assert_visibilities_match(new: np.ndarray, old: np.ndarray) -> None:
+    """Two sets of visibilities are the same"""
+    if EXACT:
+        np.testing.assert_array_equal(new, old)
+        return
+    assert new.shape == old.shape
+    np.testing.assert_allclose(new, old, rtol=1e-6, atol=1e-6)
+
+
+def assert_text_files_match(new: Path, old: Path) -> None:
+    """Two text files of numbers hold the same values"""
+    if EXACT:
+        assert new.read_bytes() == old.read_bytes()
+        return
+    new_rows = [line.split() for line in new.read_text().splitlines()]
+    old_rows = [line.split() for line in old.read_text().splitlines()]
+    assert len(new_rows) == len(old_rows)
+    for new_row, old_row in zip(new_rows, old_rows):
+        np.testing.assert_allclose(
+            np.array(new_row, dtype=float),
+            np.array(old_row, dtype=float),
+            rtol=1e-6,
+            atol=1e-9,
+        )
+
 
 CALIBRATE_CASES = {
     "flint_default": {},
@@ -85,17 +138,17 @@ def _cross_rows(ms_path: Path) -> np.ndarray:
 def test_calibrate_solutions_identical(
     case, regression_ms, bins, baseline_bins, tmpdir
 ):
-    """Solutions are byte-identical to the reference build"""
+    """Solutions are the same as the reference build's"""
     kwargs = CALIBRATE_CASES[case]
     tmpdir = Path(tmpdir)
     new = _calibrate(bins, regression_ms, tmpdir / "new.bin", **kwargs)
     old = _calibrate(baseline_bins, regression_ms, tmpdir / "old.bin", **kwargs)
 
-    assert new.read_bytes() == old.read_bytes()
+    assert_solutions_match(new, old)
 
 
 def test_calibrate_plot_files_identical(regression_ms, bins, baseline_bins, tmpdir):
-    """The -p phase and gain plot files are identical to the reference build"""
+    """The -p phase and gain plot files match the reference build's"""
     tmpdir = Path(tmpdir)
     outputs = {}
     for label, binaries in (("new", bins), ("old", baseline_bins)):
@@ -106,9 +159,10 @@ def test_calibrate_plot_files_identical(regression_ms, bins, baseline_bins, tmpd
             tmpdir / f"{label}.bin",
             extra=["-p", str(phases), str(gains)],
         )
-        outputs[label] = (phases.read_bytes(), gains.read_bytes())
+        outputs[label] = (phases, gains)
 
-    assert outputs["new"] == outputs["old"]
+    for new, old in zip(outputs["new"], outputs["old"]):
+        assert_text_files_match(new, old)
 
 
 APPLY_CASES = {
@@ -151,7 +205,7 @@ def test_applysolutions_identical(
     if case == "scan_selection":
         scans = msgen.get_column(regression_ms, "SCAN_NUMBER")
         cross &= scans >= 1
-    np.testing.assert_array_equal(outputs["new"][cross], outputs["old"][cross])
+    assert_visibilities_match(outputs["new"][cross], outputs["old"][cross])
 
 
 def test_new_solutions_apply_with_old_applysolutions(
@@ -167,7 +221,7 @@ def test_new_solutions_apply_with_old_applysolutions(
         outputs[label] = msgen.get_column(ms_path, "CORRECTED_DATA")
 
     cross = _cross_rows(regression_ms)
-    np.testing.assert_array_equal(outputs["new"][cross], outputs["old"][cross])
+    assert_visibilities_match(outputs["new"][cross], outputs["old"][cross])
 
 
 @pytest.mark.parametrize("correlations", [[0, 3], [0]], ids=["2pol", "1pol"])
@@ -188,7 +242,7 @@ def test_applysolutions_fewer_polarisations_identical(
         outputs[label] = msgen.get_column(ms_path, "CORRECTED_DATA")
 
     cross = _cross_rows(reduced)
-    np.testing.assert_array_equal(outputs["new"][cross], outputs["old"][cross])
+    assert_visibilities_match(outputs["new"][cross], outputs["old"][cross])
 
 
 @pytest.mark.parametrize("mode", ["a", "s", "c", "z"])
@@ -211,4 +265,4 @@ def test_addmodel_identical(
         outputs[label] = msgen.get_column(ms_path, datacolumn)
 
     rows = _cross_rows(regression_ms) if datacolumn == "NEW_MODEL" else slice(None)
-    np.testing.assert_array_equal(outputs["new"][rows], outputs["old"][rows])
+    assert_visibilities_match(outputs["new"][rows], outputs["old"][rows])

@@ -177,24 +177,25 @@ def add_array_column(
     value: np.ndarray,
     define_cells: bool = True,
 ) -> None:
-    """Add (or replace) a fixed-shape array column and fill it.
+    """Add (or replace) an array column and fill it.
 
     Args:
         ms_path (Path): Measurement set to modify
         name (str): Column name
         value (np.ndarray): Values for every row, shape (nrow, ...)
-        define_cells (bool, optional): If False the column is declared but no cell is written. Defaults to True.
+        define_cells (bool, optional): If False the column is declared, without
+            a fixed shape, but no cell is written, as some writers do. Defaults to True.
     """
     with table(str(ms_path), readonly=False, ack=False) as tab:
         if name in tab.colnames():
             tab.removecols(name)
+        shape_kwargs = {"shape": list(value.shape[1:]), "options": 4}  # FixedShape
         coldesc = makearrcoldesc(
             name,
             0,
             valuetype=_VALUE_TYPES[value.dtype.type],
             ndim=value.ndim - 1,
-            shape=list(value.shape[1:]),
-            options=4,  # FixedShape
+            **(shape_kwargs if define_cells else {}),
         )
         dminfo = {
             "TYPE": "TiledShapeStMan",

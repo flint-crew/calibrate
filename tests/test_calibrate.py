@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import numpy as np
@@ -152,3 +153,137 @@ def test_applysolutions_to_fewer_polarisations(
     cross = ant1 != ant2
 
     assert_restores_model(output[cross], model[cross])
+
+
+# Weights
+
+
+def heterogeneous_noise() -> np.ndarray:
+    """Four very noisy antennas among otherwise clean ones"""
+    sigma = np.full(36, 1.0)
+    sigma[:4] = 30.0
+    return sigma
+
+
+def clean_antenna_error(ms_path: Path, sol_path: Path, truth: msgen.Truth) -> float:
+    """Median gain error over baselines between the clean antennas"""
+    sols = AOSolutions.load(sol_path)
+    ant1, ant2 = msgen.antennas(ms_path)
+    error = msgen.gain_product_error(
+        sols.bandpass[0], truth.jones, ant1, ant2, exclude=set(range(4))
+    )
+    return float(np.median(error))
+
+
+def test_noisy_antennas_are_downweighted(cal_ms_factory, bins, tmpdir):
+    """With WEIGHT = 1/SIGMA^2 the noisy antennas barely affect the others.
+
+    With uniform noise of sigma=2 the median error is about 0.02, so correctly
+    weighted data with sigma=1 on the clean antennas must do at least as well.
+    Using SIGMA itself as the weight gave an error of about 0.47.
+    """
+    ms_path, truth = cal_ms_factory(noise_sigma=heterogeneous_noise())
+    sol_path = Path(tmpdir) / "sols.bin"
+    run(bins.calibrate, calibrate_args(ms_path, sol_path))
+
+    assert clean_antenna_error(ms_path, sol_path, truth) < 0.05
+
+
+@pytest.mark.parametrize(
+    "variant", ["weight_spectrum", "sigma_spectrum", "empty_weight_spectrum"]
+)
+def test_weight_columns_agree(cal_ms_factory, bins, tmpdir, variant):
+    """Every weight column layout describing the same noise gives the same answer"""
+    ms_path, _ = cal_ms_factory(name="reference", noise_sigma=heterogeneous_noise())
+    reference = Path(tmpdir) / "reference.bin"
+    run(bins.calibrate, calibrate_args(ms_path, reference))
+
+    variant_ms, _ = cal_ms_factory(name=variant, noise_sigma=heterogeneous_noise())
+    msgen.set_weight_variant(variant_ms, variant)
+    variant_sols = Path(tmpdir) / f"{variant}.bin"
+    result = run(bins.calibrate, calibrate_args(variant_ms, variant_sols))
+
+    expected_column = {
+        "weight_spectrum": "WEIGHT_SPECTRUM",
+        "sigma_spectrum": "WEIGHT",
+        "empty_weight_spectrum": "WEIGHT",
+    }[variant]
+    assert f"Using {expected_column} column for weights" in result.stdout
+    np.testing.assert_allclose(
+        AOSolutions.load(variant_sols).bandpass,
+        AOSolutions.load(reference).bandpass,
+        rtol=1e-5,
+        atol=1e-6,
+    )
+
+
+def test_weightcolumn_selects_column(cal_ms_factory, bins, tmpdir):
+    """-weightcolumn overrides the automatic choice of weight column.
+
+    WEIGHT_SPECTRUM is made uniform, so it ignores the noisy antennas, while
+    WEIGHT and SIGMA describe the noise. WEIGHT_SPECTRUM is chosen by default;
+    forcing WEIGHT or SIGMA gives the better, noise weighted solutions.
+    """
+    ms_path, truth = cal_ms_factory(noise_sigma=heterogeneous_noise())
+    flags = msgen.get_column(ms_path, "FLAG")
+    msgen.add_array_column(
+        ms_path, "WEIGHT_SPECTRUM", np.ones(flags.shape, dtype=np.float32)
+    )
+
+    errors = {}
+    for column in (None, "WEIGHT", "SIGMA", "WEIGHT_SPECTRUM"):
+        sol_path = Path(tmpdir) / f"{column}.bin"
+        extra = ["-weightcolumn", column] if column else []
+        result = run(bins.calibrate, calibrate_args(ms_path, sol_path, extra=extra))
+        assert f"Using {column or 'WEIGHT_SPECTRUM'} column" in result.stdout
+        errors[column] = clean_antenna_error(ms_path, sol_path, truth)
+
+    assert errors["WEIGHT"] < 0.05
+    assert errors["SIGMA"] == pytest.approx(errors["WEIGHT"], rel=1e-3)
+    assert errors[None] == errors["WEIGHT_SPECTRUM"]
+    assert errors[None] > 2 * errors["WEIGHT"]
+
+
+@pytest.mark.parametrize("column", ["NOT_A_COLUMN", "SIGMA_SPECTRUM"])
+def test_weightcolumn_rejects_bad_column(cal_ms_factory, bins, tmpdir, column):
+    """An unsupported or missing weight column is an error"""
+    ms_path, _ = cal_ms_factory()
+    result = run(
+        bins.calibrate,
+        calibrate_args(
+            ms_path, Path(tmpdir) / "sols.bin", extra=["-weightcolumn", column]
+        ),
+        check=False,
+    )
+    assert result.returncode != 0
+    assert column in result.stderr
+
+
+def test_retry_reproduces_first_attempt(cal_ms_factory, bins, tmpdir):
+    """A retry starts from the same state as the first attempt.
+
+    calibrate retries a channel that uses all its iterations, starting again
+    from unity. Nothing else changes between the attempts, so the retry must
+    reach exactly the same precision. The weights used to be applied a second
+    time on the retry.
+    """
+    ms_path, _ = cal_ms_factory(noise_sigma=heterogeneous_noise())
+    result = run(
+        bins.calibrate,
+        # One thread, so the log lines of different channels do not interleave
+        calibrate_args(ms_path, Path(tmpdir) / "sols.bin", i=5, extra=["-j", "1"]),
+    )
+
+    first = dict(
+        re.findall(r"Recalculating channel (\d+) \(accuracy=(\S+)\)\.", result.stdout)
+    )
+    final = dict(
+        re.findall(
+            r"finished calibrating channel (\d+) in \d+ iterations, precision=(\S+)\.$",
+            result.stdout,
+            flags=re.MULTILINE,
+        )
+    )
+    assert len(first) > 0, "No channel was retried, the test needs fewer iterations"
+    mismatched = {ch: (acc, final[ch]) for ch, acc in first.items() if final[ch] != acc}
+    assert mismatched == {}

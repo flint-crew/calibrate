@@ -8,7 +8,6 @@ does not work fails the suite (``strict=True``).
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import numpy as np
@@ -19,67 +18,6 @@ from tests.aosolutions import AOSolutions
 from tests.runner import addmodel_args, applysolutions_args, calibrate_args, run
 
 NANT = 36
-
-
-def heterogeneous_noise() -> np.ndarray:
-    """Four very noisy antennas among otherwise clean ones"""
-    sigma = np.full(NANT, 1.0)
-    sigma[:4] = 30.0
-    return sigma
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="SIGMA is used as a weight, so noisy data gets more weight (1a)",
-)
-def test_noisy_antennas_are_downweighted(cal_ms_factory, bins, tmpdir):
-    """With WEIGHT = 1/SIGMA^2 the noisy antennas barely affect the others.
-
-    With uniform noise of sigma=2 the median error is about 0.02, so correctly
-    weighted data with sigma=1 on the clean antennas must do at least as well.
-    """
-    ms_path, truth = cal_ms_factory(noise_sigma=heterogeneous_noise())
-    sol_path = Path(tmpdir) / "sols.bin"
-    run(bins.calibrate, calibrate_args(ms_path, sol_path))
-
-    sols = AOSolutions.load(sol_path)
-    ant1, ant2 = msgen.antennas(ms_path)
-    error = msgen.gain_product_error(
-        sols.bandpass[0], truth.jones, ant1, ant2, exclude=set(range(4))
-    )
-    assert np.median(error) < 0.05
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="A retried channel has its weights applied a second time (1b)",
-)
-def test_retry_reproduces_first_attempt(cal_ms_factory, bins, tmpdir):
-    """A retry starts from the same state as the first attempt.
-
-    calibrate retries a channel that uses all its iterations, starting again
-    from unity. Nothing else changes between the attempts, so the retry must
-    reach exactly the same precision.
-    """
-    ms_path, _ = cal_ms_factory(noise_sigma=heterogeneous_noise())
-    result = run(
-        bins.calibrate,
-        calibrate_args(ms_path, Path(tmpdir) / "sols.bin", i=20),
-    )
-
-    first = dict(
-        re.findall(r"Recalculating channel (\d+) \(accuracy=(\S+)\)\.", result.stdout)
-    )
-    final = dict(
-        re.findall(
-            r"finished calibrating channel (\d+) in \d+ iterations, precision=(\S+)\.$",
-            result.stdout,
-            flags=re.MULTILINE,
-        )
-    )
-    assert len(first) > 0, "No channel was retried, the test needs more noise"
-    mismatched = {ch: (acc, final[ch]) for ch, acc in first.items() if final[ch] != acc}
-    assert mismatched == {}
 
 
 @pytest.mark.xfail(
