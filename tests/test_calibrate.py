@@ -355,3 +355,204 @@ def test_scan_selection_uses_matching_interval(cal_ms_factory, bins, tmpdir):
     for scan, factor in ((0, 1.0), (1, 1.0), (2, 4.0)):
         rows = cross & (scans == scan)
         np.testing.assert_allclose(after[rows], factor * before[rows], rtol=1e-5)
+
+
+# Channel blocks (-ch), memory (-absmem) and timestep range (-interval)
+
+
+def block_bandpass(block_values: np.ndarray, nant: int = 36) -> np.ndarray:
+    """Scalar solutions per channel block, shape (1, nant, nblock, 4)"""
+    nblock = len(block_values)
+    bandpass = np.zeros((1, nant, nblock, 4), dtype=np.complex128)
+    bandpass[..., 0] = block_values
+    bandpass[..., 3] = block_values
+    return bandpass
+
+
+def channel_blocks(nchan: int, nblock: int) -> np.ndarray:
+    """Block index of every channel, laid out as calibrate does"""
+    blocks = np.zeros(nchan, dtype=int)
+    for cb in range(nblock):
+        blocks[cb * nchan // nblock : (cb + 1) * nchan // nblock] = cb
+    return blocks
+
+
+def test_ch_1_matches_default(cal_ms_factory, bins, tmpdir):
+    """-ch 1 is the default: one solution per channel"""
+    ms_path, _ = cal_ms_factory(noise_sigma=np.full(36, 1.0))
+    default = Path(tmpdir) / "default.bin"
+    ch1 = Path(tmpdir) / "ch1.bin"
+    run(bins.calibrate, calibrate_args(ms_path, default))
+    run(bins.calibrate, calibrate_args(ms_path, ch1, extra=["-ch", "1"]))
+
+    assert ch1.read_bytes() == default.read_bytes()
+
+
+def test_channel_blocks_recover_gains(cal_ms_factory, bins, tmpdir):
+    """-ch 4 solves one Jones matrix per 4 channels and applysolutions uses it"""
+    ms_path, truth = cal_ms_factory(channel_block=4)
+    sol_path = Path(tmpdir) / "sols.bin"
+    run(bins.calibrate, calibrate_args(ms_path, sol_path, extra=["-ch", "4"]))
+
+    sols = AOSolutions.load(sol_path)
+    assert (sols.nsol, sols.nant, sols.nchan, sols.npol) == (1, 36, 72, 4)
+    ant1, ant2 = msgen.antennas(ms_path)
+    per_channel = np.repeat(sols.bandpass[0], 4, axis=1)
+    error = msgen.gain_product_error(per_channel, truth.jones, ant1, ant2)
+    assert np.max(error) < NOISE_FREE_TOLERANCE
+
+    run(bins.applysolutions, applysolutions_args(ms_path, sol_path))
+    output = msgen.get_column(ms_path, "CORRECTED_DATA")
+    model = msgen.get_column(ms_path, "MODEL_DATA")
+    cross = ant1 != ant2
+    assert_restores_model(output[cross], model[cross])
+
+
+def test_uneven_channel_blocks(cal_ms_factory, bins, tmpdir):
+    """-ch 5 on 288 channels gives 57 blocks of 5 or 6 channels"""
+    ms_path, _ = cal_ms_factory(channel_block=288)
+    sol_path = Path(tmpdir) / "sols.bin"
+    run(bins.calibrate, calibrate_args(ms_path, sol_path, extra=["-ch", "5"]))
+    assert AOSolutions.load(sol_path).nchan == 288 // 5
+
+    run(bins.applysolutions, applysolutions_args(ms_path, sol_path))
+    ant1, ant2 = msgen.antennas(ms_path)
+    cross = ant1 != ant2
+    assert_restores_model(
+        msgen.get_column(ms_path, "CORRECTED_DATA")[cross],
+        msgen.get_column(ms_path, "MODEL_DATA")[cross],
+    )
+
+
+@pytest.mark.parametrize("nblock", [72, 57, 1])
+def test_applysolutions_maps_channel_blocks(cal_ms_factory, bins, tmpdir, nblock):
+    """Each channel gets the solution of the block it falls in"""
+    ms_path, _ = cal_ms_factory()
+    before = msgen.get_column(ms_path, "DATA")
+    gains = 1.0 + np.arange(nblock) / nblock
+    sol_path = AOSolutions(
+        path=Path(tmpdir) / "sols.bin",
+        nsol=1,
+        nant=36,
+        nchan=nblock,
+        npol=4,
+        bandpass=block_bandpass(gains),
+    ).save(Path(tmpdir) / "sols.bin")
+
+    run(bins.applysolutions, applysolutions_args(ms_path, sol_path))
+    after = msgen.get_column(ms_path, "CORRECTED_DATA")
+
+    factor = gains[channel_blocks(288, nblock)] ** 2
+    np.testing.assert_allclose(after, before * factor[None, :, None], rtol=1e-5)
+
+
+def test_applysolutions_rejects_too_many_channels(cal_ms_factory, bins, tmpdir):
+    """A solutions file with more channels than the MS is an error"""
+    ms_path, _ = cal_ms_factory()
+    sol_path = AOSolutions(
+        path=Path(tmpdir) / "sols.bin",
+        nsol=1,
+        nant=36,
+        nchan=289,
+        npol=4,
+        bandpass=block_bandpass(np.ones(289)),
+    ).save(Path(tmpdir) / "sols.bin")
+
+    result = run(
+        bins.applysolutions, applysolutions_args(ms_path, sol_path), check=False
+    )
+    assert result.returncode != 0
+
+
+@pytest.mark.parametrize("extra", [[], ["-ch", "4"]], ids=["channels", "blocks"])
+def test_absmem_passes_give_same_solutions(cal_ms_factory, bins, tmpdir, extra):
+    """A small -absmem splits the band into passes without changing the result.
+
+    This also checks that each pass predicts its own channel range.
+    """
+    ms_path, _ = cal_ms_factory(noise_sigma=np.full(36, 1.0))
+    one_pass = Path(tmpdir) / "one_pass.bin"
+    passes = Path(tmpdir) / "passes.bin"
+    run(bins.calibrate, calibrate_args(ms_path, one_pass, extra=extra))
+    result = run(
+        bins.calibrate,
+        calibrate_args(ms_path, passes, extra=[*extra, "-absmem", "0.002"]),
+    )
+
+    pass_count = int(re.search(r"\((\d+) passes\)", result.stdout).group(1))
+    assert pass_count > 1
+    assert passes.read_bytes() == one_pass.read_bytes()
+
+
+def test_interval_uses_selected_timesteps(cal_ms_factory, bins, tmpdir):
+    """-interval 0 2 ignores the corrupted third timestep"""
+    ms_path, truth = cal_ms_factory()
+    time = msgen.get_column(ms_path, "TIME")
+    data = msgen.get_column(ms_path, "DATA")
+    last = time == np.max(time)
+    rng = np.random.default_rng(7)
+    data[last] = 10 * (rng.normal(size=data[last].shape) + 1j)
+    msgen.put_column(ms_path, "DATA", data)
+    ant1, ant2 = msgen.antennas(ms_path)
+
+    errors = {}
+    for label, extra in (("all", []), ("interval", ["-interval", "0", "2"])):
+        sol_path = Path(tmpdir) / f"{label}.bin"
+        run(bins.calibrate, calibrate_args(ms_path, sol_path, extra=extra))
+        sols = AOSolutions.load(sol_path)
+        errors[label] = np.max(
+            msgen.gain_product_error(sols.bandpass[0], truth.jones, ant1, ant2)
+        )
+
+    assert errors["interval"] < NOISE_FREE_TOLERANCE
+    assert errors["all"] > 10 * NOISE_FREE_TOLERANCE
+
+
+def test_interval_with_solution_intervals(cal_ms_factory, bins, tmpdir):
+    """-interval 1 3 -t 1 gives one solution per selected timestep"""
+    ms_path, truth = cal_ms_factory()
+    sol_path = Path(tmpdir) / "sols.bin"
+    run(
+        bins.calibrate,
+        calibrate_args(ms_path, sol_path, extra=["-interval", "1", "3", "-t", "1"]),
+    )
+
+    sols = AOSolutions.load(sol_path)
+    assert sols.nsol == 2
+    ant1, ant2 = msgen.antennas(ms_path)
+    for interval in range(2):
+        error = msgen.gain_product_error(
+            sols.bandpass[interval], truth.jones, ant1, ant2
+        )
+        assert np.max(error) < NOISE_FREE_TOLERANCE
+
+
+def test_applysolutions_interval(cal_ms_factory, bins, tmpdir):
+    """applysolutions -interval 1 3 maps solution intervals like calibrate"""
+    ms_path, _ = cal_ms_factory()
+    before = msgen.get_column(ms_path, "DATA")
+    time = msgen.get_column(ms_path, "TIME")
+    _, timestep = np.unique(time, return_inverse=True)
+
+    bandpass = np.concatenate(
+        [block_bandpass(np.ones(288)), 2 * block_bandpass(np.ones(288))]
+    )
+    sol_path = AOSolutions(
+        path=Path(tmpdir) / "sols.bin",
+        nsol=2,
+        nant=36,
+        nchan=288,
+        npol=4,
+        bandpass=bandpass,
+    ).save(Path(tmpdir) / "sols.bin")
+
+    run(
+        bins.applysolutions,
+        applysolutions_args(
+            ms_path, sol_path, copy=False, extra=["-interval", "1", "3"]
+        ),
+    )
+    after = msgen.get_column(ms_path, "DATA")
+    for step, factor in ((0, 1.0), (1, 1.0), (2, 4.0)):
+        rows = timestep == step
+        np.testing.assert_allclose(after[rows], factor * before[rows], rtol=1e-5)

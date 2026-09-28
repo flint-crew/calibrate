@@ -10,11 +10,14 @@ int main(int argc, char *argv[])
 	if(argc < 3)
 	{
 		std::cout
-			<< "Usage: calibrate [-p <phases.txt> <gains.txt>] [-refmode <0|1|2>] [-minuv <min uvw dist in m>] [-maxuv <max uvw dist in m>] [-startscan <scan>] [-endscan <scan>] [-a <min-accuracy> <stop-accuracy>] [-i <niter>] [-j <threads>] [-m <model>] [-scalar] [-diag] [-rhs <rhs solutions>] [-rotation] [-t timesteps] [-datacolumn <name>] [-weightcolumn <name>] [-quiet] <measurementset.ms> <solutions.bin>\n\n"
+			<< "Usage: calibrate [-p <phases.txt> <gains.txt>] [-refmode <0|1|2>] [-minuv <min uvw dist in m>] [-maxuv <max uvw dist in m>] [-startscan <scan>] [-endscan <scan>] [-a <min-accuracy> <stop-accuracy>] [-i <niter>] [-j <threads>] [-m <model>] [-scalar] [-diag] [-rhs <rhs solutions>] [-rotation] [-t timesteps] [-ch <channels per solution>] [-interval <start timestep> <end timestep>] [-absmem <memory in GB>] [-datacolumn <name>] [-weightcolumn <name>] [-quiet] <measurementset.ms> <solutions.bin>\n\n"
 			<< "This will calculate \"static\" phase offsets for all stations. It produces approximate least-squares solutions.\n"
 			<< "The algorithm is described by Offringa et al. (2016), MNRAS 458, 1057, doi:10.1093/mnras/stw310; please cite it when using this program.\n"
             << "refmode=0 process all baselines; =1 only include baselines to reference antenna; =2 exclude baselines to reference antenna.\n"
             << "rhs: accepted for compatibility, but has no effect.\n"
+            << "ch: solve one solution per block of this many channels (default 1: every channel).\n"
+            << "interval: only use timesteps start to end-1 of the measurement set (counting from 0).\n"
+            << "absmem: memory to plan for in GB, instead of the machine's physical memory.\n"
             << "weightcolumn: WEIGHT_SPECTRUM, WEIGHT, SIGMA_SPECTRUM or SIGMA (SIGMA columns are used as 1/sigma^2). Default: WEIGHT_SPECTRUM if it has values, otherwise WEIGHT.\n";
 	} else {
 		int argi = 1;
@@ -24,6 +27,9 @@ int main(int argc, char *argv[])
 			onlyScalar = false, onlyDiag = false, onlyRotation = false, doQuiet = false;
 		std::string plotPhaseFile, plotGainFile, plotFaradayFile, crossTermsPlotFile, rhsSolutionFile, modelFile;
 		size_t niter = CalibrationMethod::DefaultNIter(), solutionInterval = 0, startScan = -1, endScan = -1, refMode=0;
+		size_t solutionChannels = 1, intervalStart = 0, intervalEnd = 0;
+		bool hasInterval = false;
+		double absMem = 0.0;
 		std::string dataColumnName = "DATA", weightColumnName;
 		double
 			minAccuracy = CalibrationMethod::DefaultMinAccuracy(),
@@ -76,6 +82,23 @@ int main(int argc, char *argv[])
 			else if(param == "t")
 			{
 				solutionInterval = atoi(argv[argi+1]);
+				argi += 2;
+			}
+			else if(param == "ch")
+			{
+				solutionChannels = atoi(argv[argi+1]);
+				argi += 2;
+			}
+			else if(param == "interval")
+			{
+				hasInterval = true;
+				intervalStart = atoi(argv[argi+1]);
+				intervalEnd = atoi(argv[argi+2]);
+				argi += 3;
+			}
+			else if(param == "absmem")
+			{
+				absMem = atof(argv[argi+1]);
 				argi += 2;
 			}
 			else if(param == "startscan")
@@ -144,6 +167,10 @@ int main(int argc, char *argv[])
 		calibrator.SetAccuracy(minAccuracy, stopAccuracy);
 		calibrator.SetModelFilename(modelFile);
 		calibrator.SetSolutionInterval(solutionInterval);
+		calibrator.SetSolutionChannels(solutionChannels);
+		calibrator.SetAbsMem(absMem);
+		if(hasInterval)
+			calibrator.SetInterval(intervalStart, intervalEnd);
 		calibrator.SetStartScan(startScan);
 		calibrator.SetEndScan(endScan);
 		calibrator.SetMinUVW(minUVW);

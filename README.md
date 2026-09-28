@@ -72,25 +72,35 @@ These tools perform "MitchCal":
 
 > a direction-independent full-polarization self-calibration. This is performed with the mitchcal tool, which is the authors’ custom implementation of the algorithm described by Mitchell et al. (2008)
 
-In the current form of this repo, only a single time-step, frequency dependent solution is computed. This is suitable for a bandpass calibration.
+By default a single time-step, frequency dependent solution is computed, which is suitable for a bandpass calibration. `-t` gives one solution per group of timesteps and `-ch` one solution per block of channels.
+
+Visibilities are weighted by WEIGHT_SPECTRUM if it is filled, otherwise by WEIGHT; SIGMA_SPECTRUM and SIGMA (as 1/sigma^2) are used only when there is no WEIGHT column. `-weightcolumn` selects a column explicitly.
 
 The CLI hooks are:
 
 ```bash
 calibrate
-# Usage: calibrate [-p <phases.txt> <gains.txt>] [-refmod <0|1|2> [-minuv <min uvw dist in m>] [-maxuv <min uvw dist in m>] [-startscan <scan>] [-endscan <scan>] [-a <min-accuracy> <stop-accuracy>] [-i <niter>] [-j <threads>] [-m <model>] [-scalar] [-diag] [-rhs <rhs solutions>] [-rotation] [-t timesteps] [-datacolumn <name>] [-quiet] <measurementset.ms> <solutions.bin>
-
+# Usage: calibrate [-p <phases.txt> <gains.txt>] [-refmode <0|1|2>] [-minuv <min uvw dist in m>] [-maxuv <max uvw dist in m>] [-startscan <scan>] [-endscan <scan>] [-a <min-accuracy> <stop-accuracy>] [-i <niter>] [-j <threads>] [-m <model>] [-scalar] [-diag] [-rhs <rhs solutions>] [-rotation] [-t timesteps] [-ch <channels per solution>] [-interval <start timestep> <end timestep>] [-absmem <memory in GB>] [-datacolumn <name>] [-weightcolumn <name>] [-quiet] <measurementset.ms> <solutions.bin>
+#
 # This will calculate "static" phase offsets for all stations. It produces approximate least-squares solutions.
+# The algorithm is described by Offringa et al. (2016), MNRAS 458, 1057, doi:10.1093/mnras/stw310; please cite it when using this program.
 # refmode=0 process all baselines; =1 only include baselines to reference antenna; =2 exclude baselines to reference antenna.
+# rhs: accepted for compatibility, but has no effect.
+# ch: solve one solution per block of this many channels (default 1: every channel).
+# interval: only use timesteps start to end-1 of the measurement set (counting from 0).
+# absmem: memory to plan for in GB, instead of the machine's physical memory.
+# weightcolumn: WEIGHT_SPECTRUM, WEIGHT, SIGMA_SPECTRUM or SIGMA (SIGMA columns are used as 1/sigma^2). Default: WEIGHT_SPECTRUM if it has values, otherwise WEIGHT.
 ```
 
 ```bash
 applysolutions
-# Usage: applysolutions [-datacolumn <name>] [-gflag <solutions-flag-file.txt>] [-startscan <scan>] [-endscan <scan>] [-copy/-nocopy] [-s xx xy yx yy] <ms> <gains-bin-file>
+# Usage: applysolutions [-datacolumn <name>] [-gflag <solutions-flag-file.txt>] [-startscan <scan>] [-endscan <scan>] [-interval <start timestep> <end timestep>] [-copy/-nocopy] [-s xx xy yx yy] <ms> <gains-bin-file>
 # Will apply the found solution matrices.
 # Options:
 #   -copy/-nocopy Don't(/do) alter the original DATA column but store the corrected data in the CORRECTED_DATA (this is std CASA behaviour)
 #     default: -copy
+#   -interval Only correct timesteps start to end-1 (counting from 0), as calibrate -interval
+# Solutions for blocks of channels (calibrate -ch) are applied to every channel of their block.
 ```
 
 ```bash

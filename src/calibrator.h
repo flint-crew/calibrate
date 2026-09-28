@@ -109,6 +109,26 @@ public:
 		_solutionInterval = solutionInterval;
 	}
 	
+	/** Solve one solution per block of this many channels (1 = every channel). */
+	void SetSolutionChannels(size_t solutionChannels)
+	{
+		_solutionChannels = solutionChannels == 0 ? 1 : solutionChannels;
+	}
+	
+	/** Memory to plan for, in GB. 0 uses the physical memory of the machine. */
+	void SetAbsMem(double absMem)
+	{
+		_absMem = absMem;
+	}
+	
+	/** Only use timesteps [start, end) of the measurement set. */
+	void SetInterval(size_t start, size_t end)
+	{
+		_hasInterval = true;
+		_intervalStart = start;
+		_intervalEnd = end;
+	}
+	
 	void SetStartScan(int startScan)
 	{
 		_startScan = startScan;
@@ -159,12 +179,15 @@ private:
 	std::string _modelFilename, _solutionFilename, _rhsSolutionFilename, _dataColumnName, _weightColumnName;
 	Model _model;
 	double _minAccuracy, _stoppingAccuracy;
-	size_t _nIter, _solutionInterval;
+	size_t _nIter, _solutionInterval, _solutionChannels;
     int _startScan, _endScan;
     size_t _threadCount, _refMode;
 	bool _onlyScalar, _onlyDiag, _onlyRotation;
 	double _minUVW, _maxUVW;
 	bool _savePlotFiles, _saveFaradayPlotFiles, _saveCrossTermsPlotFile, _verbose;
+	double _absMem;
+	bool _hasInterval;
+	size_t _intervalStart, _intervalEnd;
 	std::string _phasePlotFilename, _gainPlotFilename, _faradayPlotFilename, _crossTermsPlotFilename;
 };
 

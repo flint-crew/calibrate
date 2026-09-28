@@ -21,7 +21,10 @@ public:
 	_inputColumnName(casacore::MeasurementSet::columnName(casacore::MSMainEnums::DATA)),
 	_outputColumnName(casacore::MeasurementSet::columnName(casacore::MSMainEnums::DATA)),
     _startScan(-1),
-    _endScan(-1)
+    _endScan(-1),
+	_hasInterval(false),
+	_intervalStart(0),
+	_intervalEnd(0)
 	{
 	}
 	
@@ -45,6 +48,13 @@ public:
 	}
 	void SetStartScan(size_t startScan) { _startScan = startScan; }
 	void SetEndScan(size_t endScan) { _endScan = endScan; }
+	/** Only correct timesteps [start, end) of the measurement set, as calibrate -interval. */
+	void SetInterval(size_t start, size_t end)
+	{
+		_hasInterval = true;
+		_intervalStart = start;
+		_intervalEnd = end;
+	}
 	
 	void Apply(casacore::MeasurementSet& ms, SolutionFile& solutionFile)
 	{
@@ -106,8 +116,22 @@ public:
 		std::cout << "Counting timesteps... " << std::flush;
 		double time = -1.0;
 		std::vector<size_t> timestepRows;
+		size_t msTimestep = 0, lastRow = ms.nrow();
+		double msTime = timeColumn(0);
 		for(size_t rowIndex=0;rowIndex!=ms.nrow();++rowIndex)
 		{
+			if(timeColumn(rowIndex) != msTime)
+			{
+				++msTimestep;
+				msTime = timeColumn(rowIndex);
+			}
+			if(_hasInterval && msTimestep < _intervalStart)
+				continue;
+			if(_hasInterval && msTimestep >= _intervalEnd)
+			{
+				lastRow = rowIndex;
+				break;
+			}
 			// Count timesteps the same way as calibrate, so that solution
 			// intervals line up when a scan range is selected
 			const int scan = scanColumn(rowIndex);
@@ -119,15 +143,18 @@ public:
 			}
 		}
 		size_t timestepCount = timestepRows.size();
-		timestepRows.push_back(ms.nrow());
+		timestepRows.push_back(lastRow);
 		std::cout << "DONE (" << timestepCount << " timesteps)\n";
 	
 		/**
 		 * Read the solutions file
 		 */
+		// Solutions may be for blocks of channels (calibrate -ch). Block cb
+		// covers channels [cb*C/B, (cb+1)*C/B), as in calibrate.
+		const size_t channelBlockCount = _preset ? channelCount : solutionFile.ChannelCount();
 		std::vector<std::complex<double>*> values(antennaCount);
 		for(size_t a = 0; a!=antennaCount; ++a) {
-			values[a] = new std::complex<double>[channelCount*4];
+			values[a] = new std::complex<double>[channelBlockCount*4];
 		}
 		if(_preset)
 		{
@@ -148,12 +175,20 @@ public:
 				s << "Antenna counts do not match: " << solutionFile.AntennaCount() << " in solution file, " << antennaCount << " in MS.";
 				throw std::runtime_error(s.str());
 			}
-			if(solutionFile.ChannelCount() != channelCount)
+			if(channelBlockCount == 0 || channelBlockCount > channelCount)
 				throw std::runtime_error("Set and solution file have different number of channels");
 //			if(solutionFile.PolarizationCount() != polarizationCount) throw std::runtime_error("Polarization counts do not match");
 			if(solutionFile.PolarizationCount() != 4) throw std::runtime_error("Polarization count not suitable in solution file, need 4 polarizations");
-			if(channelCount%solutionFile.ChannelCount()!=0) throw std::runtime_error("Channel counts do not match");
 			std::cout << " DONE\n";
+			if(channelBlockCount != channelCount)
+				std::cout << "Solutions are for " << channelBlockCount << " channel blocks of about "
+					<< channelCount / channelBlockCount << " channels.\n";
+		}
+		std::vector<size_t> blockOfChannel(channelCount);
+		for(size_t cb=0; cb!=channelBlockCount; ++cb)
+		{
+			for(size_t ch=cb*channelCount/channelBlockCount; ch!=(cb+1)*channelCount/channelBlockCount; ++ch)
+				blockOfChannel[ch] = cb;
 		}
 		
 		/**
@@ -167,7 +202,7 @@ public:
 			if(!_preset)
 			{
 				for(size_t a = 0; a!=antennaCount; ++a) {
-					for(size_t ch = 0; ch!=channelCount; ++ch) {
+					for(size_t ch = 0; ch!=channelBlockCount; ++ch) {
 						for(size_t p = 0; p!=4; ++p) {
 							values[a][ch*4+p] = solutionFile.ReadNextSolution();
 						}
@@ -183,7 +218,7 @@ public:
     		std::cout << "- TimeStep " << intervalTimestepStart << " to " << intervalTimestepEnd << "\n";
 			std::cout << "  Interval " << (interval+1) << '/' << solutionFile.IntervalCount() << " (" << intervalRowStart << '-' << intervalRowEnd << ")\n";
 			if(antennaCount > 1)
-				std::cout << "  Antenna1: " << values[1][(channelCount/2)*4] << "\n";
+				std::cout << "  Antenna1: " << values[1][(channelBlockCount/2)*4] << "\n";
 			for(size_t rowIndex=intervalRowStart; rowIndex!=intervalRowEnd; ++rowIndex)
 			{
 				size_t a1 = ant1Column.get(rowIndex);
@@ -207,7 +242,7 @@ public:
 					
 					for(size_t ch=0; ch!=channelCount; ++ch)
 					{
-						size_t chFileIndex = ch * 4;
+						size_t chFileIndex = blockOfChannel[ch] * 4;
 						std::complex<double>
 						*solA = &values[a1][chFileIndex],
 						*solB = &values[a2][chFileIndex];
@@ -272,6 +307,8 @@ private:
 	std::complex<double> _presetValues[4];
 	std::string _inputColumnName, _outputColumnName;
 	int _startScan, _endScan;
+	bool _hasInterval;
+	size_t _intervalStart, _intervalEnd;
 };
 
 #endif

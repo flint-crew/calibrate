@@ -27,6 +27,7 @@ Calibrator::Calibrator(casacore::MeasurementSet& ms, size_t threadCount) :
     _stoppingAccuracy(CalibrationMethod::DefaultStoppingAccuracy()),
     _nIter(1000),
     _solutionInterval(0),
+    _solutionChannels(1),
     _startScan(-1),
     _endScan(-1),
     _threadCount(threadCount),
@@ -39,7 +40,11 @@ Calibrator::Calibrator(casacore::MeasurementSet& ms, size_t threadCount) :
     _savePlotFiles(false),
     _saveFaradayPlotFiles(false),
     _saveCrossTermsPlotFile(false),
-    _verbose(false)
+    _verbose(false),
+    _absMem(0.0),
+    _hasInterval(false),
+    _intervalStart(0),
+    _intervalEnd(0)
 {
     std::cout << "Calibrator::Calibrator minAccuracy:" << _minAccuracy << "; stoppingAccuracy:" << _stoppingAccuracy << "\n";
 }
@@ -136,8 +141,24 @@ void Calibrator::Perform()
         std::cout << "DONE\nCounting timesteps... " << std::flush;
     double time = -1.0;
     std::vector<size_t> timestepRows;
+    // With -interval only timesteps [_intervalStart, _intervalEnd) of the MS
+    // are used, and the last row used is the one before timestep _intervalEnd
+    size_t msTimestep = 0, lastRow = _ms.nrow();
+    double msTime = timeColumn(0);
     for(size_t rowIndex=0;rowIndex!=_ms.nrow();++rowIndex)
     {
+        if(timeColumn(rowIndex) != msTime)
+        {
+            ++msTimestep;
+            msTime = timeColumn(rowIndex);
+        }
+        if(_hasInterval && msTimestep < _intervalStart)
+            continue;
+        if(_hasInterval && msTimestep >= _intervalEnd)
+        {
+            lastRow = rowIndex;
+            break;
+        }
         if((_startScan == -1 || scanColumn(rowIndex) >= _startScan) && (_endScan == -1 || scanColumn(rowIndex) <= _endScan))
         if(timeColumn(rowIndex) != time)
         {
@@ -146,7 +167,7 @@ void Calibrator::Perform()
         }
     }
     size_t timestepCount = timestepRows.size();
-    timestepRows.push_back(_ms.nrow());
+    timestepRows.push_back(lastRow);
     size_t intervalCount = (_solutionInterval!=0) ? (timestepCount + _solutionInterval - 1) / _solutionInterval : 1;
     if(_verbose)
      std::cout << "DONE (" << timestepCount << " timesteps, " << intervalCount << " intervals)\n";
@@ -160,7 +181,20 @@ void Calibrator::Perform()
     }
 
     _solutionFile.SetAntennaCount(antennaCount);
-    _solutionFile.SetChannelCount(channelCount);
+    // Channel blocks as in upstream mwa-reduce: -ch N gives channelCount / N
+    // blocks, block cb covering channels [cb*C/B, (cb+1)*C/B)
+    size_t chBlockCount = channelCount / _solutionChannels;
+    if(chBlockCount == 0)
+        chBlockCount = 1;
+    std::vector<size_t> blockOfChannel(channelCount);
+    for(size_t cb=0; cb!=chBlockCount; ++cb)
+    {
+        for(size_t ch=cb*channelCount/chBlockCount; ch!=(cb+1)*channelCount/chBlockCount; ++ch)
+            blockOfChannel[ch] = cb;
+    }
+    if(_verbose && chBlockCount != channelCount)
+        std::cout << "Solving " << chBlockCount << " channel blocks of about " << _solutionChannels << " channels\n";
+    _solutionFile.SetChannelCount(chBlockCount);
     _solutionFile.SetIntervalCount(intervalCount);
     _solutionFile.SetPolarizationCount(4);
     if(_solutionFilename.empty())
@@ -171,6 +205,8 @@ void Calibrator::Perform()
     long int pageCount = sysconf(_SC_PHYS_PAGES);
     long int pageSize = sysconf(_SC_PAGE_SIZE);
     int64_t memSize = (int64_t) pageCount * (int64_t) pageSize;
+    if(_absMem > 0.0)
+        memSize = (int64_t) (_absMem * 1024.0 * 1024.0 * 1024.0);
     double memSizeInGB = (double) memSize / (1024.0*1024.0*1024.0);
     size_t nBaselines = antennaCount * (antennaCount-1) / 2;
     
@@ -189,35 +225,50 @@ void Calibrator::Perform()
         if(_verbose)
         {
             std::cout << "Will use " << _threadCount << " cores.\n";
-            std::cout << "Detected " << round(memSizeInGB*10.0)/10.0 << " GB of system memory.\n";
+            std::cout << (_absMem > 0.0 ? "Using " : "Detected ") << round(memSizeInGB*10.0)/10.0 << " GB of system memory.\n";
             std::cout << "One channel takes " << round(memPerChannel*10.0/(1024*1024))/10.0 << " MB of mem.\n";
         }
-        size_t channelsPerPass = memSize / memPerChannel;
-        if(channelsPerPass > channelCount)
-            channelsPerPass = channelCount;
-        if(channelsPerPass == 0) {
+        // A pass holds whole channel blocks (single channels without -ch)
+        const size_t channelsPerBlock = (channelCount + chBlockCount - 1) / chBlockCount;
+        size_t blocksPerPass = memSize / (memPerChannel * channelsPerBlock);
+        if(blocksPerPass > chBlockCount)
+            blocksPerPass = chBlockCount;
+        if(blocksPerPass == 0) {
             if(_verbose)
                 std::cout << "WARNING: NOT ENOUGH MEMORY FOR EVEN ONE CHANNEL, expect very bad performance.\n";
-            channelsPerPass = 1;
+            blocksPerPass = 1;
         }
-        size_t passCount = (channelCount + channelsPerPass - 1) / channelsPerPass;
+        size_t passCount = (chBlockCount + blocksPerPass - 1) / blocksPerPass;
         if(_verbose)
-            std::cout << "Number of channels that fit in memory: " << channelsPerPass << " (" << passCount << " passes)\n";
+        {
+            if(chBlockCount == channelCount)
+                std::cout << "Number of channels that fit in memory: " << blocksPerPass << " (" << passCount << " passes)\n";
+            else
+                std::cout << "Number of channel blocks that fit in memory: " << blocksPerPass << " (" << passCount << " passes)\n";
+        }
         
         for(size_t pass=0; pass!=passCount; ++pass) {
-            size_t startChannel = (channelCount * pass) / passCount;
-            size_t endChannel = (channelCount * (pass+1)) / passCount;
+            size_t startBlock = (chBlockCount * pass) / passCount;
+            size_t endBlock = (chBlockCount * (pass+1)) / passCount;
+            size_t partBlockCount = endBlock - startBlock;
+            size_t startChannel = startBlock * channelCount / chBlockCount;
+            size_t endChannel = endBlock * channelCount / chBlockCount;
             size_t partChannelCount = endChannel - startChannel;
             std::cout << "pass = " << pass << "; start=" << startChannel << "; end=" << endChannel << "; count=" << partChannelCount << "\n";
             BandData partBandData(bandData, startChannel, endChannel);
 
-            std::vector<CalibrationMethod*> calMethods(partChannelCount);
-            for(size_t ch=0; ch!=partChannelCount; ++ch)
+            // Each block is solved as one channel whose samples are all
+            // timesteps of all its channels: channel c of the block is
+            // stored at timesteps [c*T, (c+1)*T)
+            std::vector<CalibrationMethod*> calMethods(partBlockCount);
+            for(size_t b=0; b!=partBlockCount; ++b)
             {
-                calMethods[ch] = new CalibrationMethod(1, antennaCount, timestepsInInterval);
-                calMethods[ch]->SetOnlySolveScalar(_onlyScalar);
-                calMethods[ch]->SetOnlySolveDiag(_onlyDiag);
-                calMethods[ch]->SetOnlySolveRotation(_onlyRotation);
+                const size_t cb = b + startBlock;
+                const size_t blockChannels = (cb+1)*channelCount/chBlockCount - cb*channelCount/chBlockCount;
+                calMethods[b] = new CalibrationMethod(1, antennaCount, timestepsInInterval * blockChannels);
+                calMethods[b]->SetOnlySolveScalar(_onlyScalar);
+                calMethods[b]->SetOnlySolveDiag(_onlyDiag);
+                calMethods[b]->SetOnlySolveRotation(_onlyRotation);
             }
             std::unique_ptr<MSPredicter> predicter;
 			std::unique_ptr<ProgressBar> progress;
@@ -235,6 +286,8 @@ void Calibrator::Perform()
             predicter->SetEndRow(intervalRowEnd);
             predicter->SetStartScan(_startScan);
             predicter->SetEndScan(_endScan);
+            // Only predict the channels of this pass
+            predicter->SetChannelRange(startChannel, endChannel);
 
             std::vector<std::complex<double> > modelValues(4 * channelCount);
             casacore::Array<complex_t> data(dataShape);
@@ -338,7 +391,9 @@ void Calibrator::Perform()
                                 weightsPtr[chIndex+3] = 0.0;
                             }
                         }
-                        calMethods[ch]->AddData(&dataPtr[chIndex], &weightsPtr[chIndex], &modelValues[chIndex], antenna1, antenna2, rowData.timeIndex);
+                        const size_t cb = blockOfChannel[ch + startChannel];
+                        const size_t channelInBlock = ch + startChannel - cb*channelCount/chBlockCount;
+                        calMethods[cb - startBlock]->AddData(&dataPtr[chIndex], &weightsPtr[chIndex], &modelValues[chIndex], antenna1, antenna2, channelInBlock * timestepsInInterval + rowData.timeIndex);
                     }
                 }
                 
@@ -348,8 +403,8 @@ void Calibrator::Perform()
                 std::cout << "DONE (" << selectedCount<< "/" << (selectedCount+notSelected) << " rows selected)\nCalibrating...\n";
         
             std::queue<size_t> tasks;
-            for(size_t ch=0; ch!=partChannelCount; ++ch)
-                tasks.push(ch);
+            for(size_t b=0; b!=partBlockCount; ++b)
+                tasks.push(b);
             boost::thread_group threadGroup;
             boost::mutex mutex;
             for(size_t i=0; i!=_threadCount; ++i)
@@ -368,7 +423,7 @@ void Calibrator::Perform()
             // Save solutions
             for(size_t ant=0; ant!=antennaCount; ++ant)
             {
-                for(size_t ch=0; ch!=partChannelCount; ++ch)
+                for(size_t ch=0; ch!=partBlockCount; ++ch)
                 {
                     std::complex<double> val[4];
                     for(size_t p=0; p!=4; ++p)
@@ -377,7 +432,7 @@ void Calibrator::Perform()
                     
                     for(size_t p=0; p!=4; ++p)
                     {
-                        _solutionFile.WriteSolution(val[p], intervalIndex, ant, ch+startChannel, p);
+                        _solutionFile.WriteSolution(val[p], intervalIndex, ant, ch+startBlock, p);
                     }
                 }
             }
@@ -385,13 +440,13 @@ void Calibrator::Perform()
             if(_savePlotFiles)
             {
                 std::ofstream phasePlotStream(_phasePlotFilename.c_str()), gainPlotStream(_gainPlotFilename.c_str());
-                phasePlotStream << antennaCount << ' ' << partChannelCount << " 4\n";
-                gainPlotStream << antennaCount << ' ' << partChannelCount << " 4\n";
+                phasePlotStream << antennaCount << ' ' << partBlockCount << " 4\n";
+                gainPlotStream << antennaCount << ' ' << partBlockCount << " 4\n";
                 
-                for(size_t ch=0; ch!=partChannelCount; ++ch)
+                for(size_t ch=0; ch!=partBlockCount; ++ch)
                 {
-                    phasePlotStream << (ch+startChannel) << '\t';
-                    gainPlotStream << (ch+startChannel) << '\t';
+                    phasePlotStream << (ch+startBlock) << '\t';
+                    gainPlotStream << (ch+startBlock) << '\t';
                     
                     for(size_t p=0; p!=4; ++p)
                     {
@@ -422,9 +477,9 @@ void Calibrator::Perform()
             {
                 std::ofstream faradayPlotStream(_faradayPlotFilename.c_str());
                 
-                for(size_t ch=0; ch!=partChannelCount; ++ch)
+                for(size_t ch=0; ch!=partBlockCount; ++ch)
                 {
-                    faradayPlotStream << (ch+startChannel) << '\t';
+                    faradayPlotStream << (ch+startBlock) << '\t';
                     
                     for(size_t ant=0; ant!=antennaCount; ++ant)
                     {
@@ -442,9 +497,9 @@ void Calibrator::Perform()
             {
                 std::ofstream crossTermPlotStream(_crossTermsPlotFilename.c_str());
                 
-                for(size_t ch=0; ch!=partChannelCount; ++ch)
+                for(size_t ch=0; ch!=partBlockCount; ++ch)
                 {
-                    crossTermPlotStream << (ch+startChannel) << '\t';
+                    crossTermPlotStream << (ch+startBlock) << '\t';
                     
                     for(size_t ant=0; ant!=antennaCount; ++ant)
                     {
@@ -459,7 +514,7 @@ void Calibrator::Perform()
                 }
             }
             
-            for(size_t ch=0; ch!=partChannelCount; ++ch)
+            for(size_t ch=0; ch!=partBlockCount; ++ch)
                 delete calMethods[ch];
         }
     }
