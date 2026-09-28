@@ -8,6 +8,12 @@ Colloquially referred to as `aocalibrate` in Flint.
 
 Note that [MWA Hyperdrive](https://github.com/MWATelescope/mwa_hyperdrive) is a more modern, and well-supported implementation of these algorithems.
 
+## Provenance
+
+This code was copied from [ICRAR/mwa-reduce](https://github.com/ICRAR/mwa-reduce), written by André Offringa with contributions from Marcin Sokolowski, Natasha Hurley-Walker, Paul Hancock, Tim Galvin and others. The first commit here (`146fc39`, Emil Lenc, 2021) is that copy, without its history. The upstream history up to [`90b202d`](https://github.com/ICRAR/mwa-reduce/commit/90b202d2d6cc5ee25e7f18dd1fecc8c6bfebe3d3) (March 2021, the last upstream commit before the copy) has since been merged into this repository's history, so `git log 90b202d` shows it.
+
+The copied files do not all come from the same upstream version: `calibrator.cpp`, `calibrationmethod.cpp` and `solutionapplier.h` match upstream from around 2015 (`83f8275`), `predicter` and `mspredicter` from October 2018, and `model/` from later upstream code. Later upstream commits have not been merged; fixes from them are ported individually.
+
 ## Installation
 
 ### Prerequisites
