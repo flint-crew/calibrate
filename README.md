@@ -98,3 +98,18 @@ addmodel
 # Usage: addmodel [-usemodelcol] [-datacolumn <COLUMN>] [-m <a|s|c|z>] [-n <σ>] <model> <ms>
 # Modify visibilities using a model. If -usemodelcol is specified then the MODEL_DATA column is used as the source model otherwise the specified component model file is used. The modification to use is defined with the mode switch(-m) where a=add model to visibilities (default), s=subtract model from visibilities, c=copy model to visibilities, z=zero visibilities.
 ```
+## Testing
+
+The `tests/` directory holds a pytest suite that runs the built programs on
+small measurement sets with known Jones matrices, using Flint's test data and
+command lines. It needs `python-casacore>=3.6`, `numpy>=2` and `pytest`:
+
+```bash
+pip install "python-casacore>=3.6" "numpy>=2" pytest
+pytest                                   # uses ./build, or $PATH
+CALIBRATE_BIN_DIR=/path/to/build pytest  # a specific build
+```
+
+Setting `BASELINE_BIN_DIR` to a build of `main` also runs the regression tests,
+which check that every existing option still gives byte-identical output. See
+[`tests/README.md`](tests/README.md) for details.
