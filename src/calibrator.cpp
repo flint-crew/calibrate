@@ -4,6 +4,7 @@
 #include "banddata.h"
 #include "matrix2x2.h"
 #include "progressbar.h"
+#include "roworder.h"
 
 #include "mspredicter.h"
 
@@ -50,6 +51,13 @@ Calibrator::Calibrator(casacore::MeasurementSet& ms, size_t threadCount) :
 }
 
 namespace {
+    /** Replaces each of the four values of a 2x2 matrix by its complex conjugate. */
+    void conjugate(std::complex<double>* values)
+    {
+        for(size_t p=0; p!=4; ++p)
+            values[p] = std::conj(values[p]);
+    }
+
     /** Replaces the 2x2 matrix (XX, XY, YX, YY) by its conjugate transpose. */
     template<typename T>
     void conjugateTranspose(std::complex<T>* values)
@@ -149,6 +157,12 @@ void Calibrator::Perform()
 
     if(polarizationCount != 4)
         throw std::runtime_error("Pol count in MS != 4");
+
+    // Reversed rows are solved correctly (see the conjugate-transpose below),
+    // but their solutions are written conjugated, as calibrate always has.
+    const bool reversedRows = GetRowOrder(_ms) == RowOrder::Reversed;
+    if(reversedRows)
+        std::cout << "All rows have ANTENNA1 > ANTENNA2: solutions are written in the conjugate convention for such data\n";
 
     if(_verbose)
         std::cout << "DONE\nCounting timesteps... " << std::flush;
@@ -454,6 +468,8 @@ void Calibrator::Perform()
                     for(size_t p=0; p!=4; ++p)
                         val[p] = calMethods[ch]->JonesSolution(ant, 0, p);
                     Matrix2x2::Invert(val);
+                    if(reversedRows)
+                        conjugate(val);
                     
                     for(size_t p=0; p!=4; ++p)
                     {
@@ -481,6 +497,8 @@ void Calibrator::Perform()
                             for(size_t p2=0; p2!=4; ++p2)
                                 val[p2] = calMethods[ch]->JonesSolution(ant, 0, p2);
                             Matrix2x2::Invert(val);
+                            if(reversedRows)
+                                conjugate(val);
                     
                             double s1, s2;
                             Matrix2x2::SingularValues(val, s1, s2);
@@ -511,6 +529,8 @@ void Calibrator::Perform()
                         std::complex<double> val[4];
                         for(size_t p=0; p!=4; ++p)
                             val[p] = calMethods[ch]->JonesSolution(ant, 0, p);
+                        if(reversedRows)
+                            conjugate(val);
                 
                         faradayPlotStream << '\t' << -Matrix2x2::RotationAngle(val);
                     }

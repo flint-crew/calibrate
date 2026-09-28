@@ -50,8 +50,8 @@ solutions and corrected data.
 | `test_aosolutions.py` | The `.bin` solutions format, read with Flint's reader; applying real Flint solution files |
 | `test_calibrate.py` | Known Jones matrices are recovered (full-Jones, `-diag`, `-t`, `-ch`, `-interval`, `-absmem`, noisy data); weighting and `-weightcolumn`; `applysolutions` restores the model for 4, 2 and 1 polarisations, including autocorrelations |
 | `test_addmodel.py` | The add, subtract, copy and zero modes, and creating a new column |
-| `test_regression.py` | Same output as `BASELINE_BIN_DIR` for all existing options (byte-identical with `REGRESSION_EXACT=1`, see the module docstring) |
-| `test_reversed_baselines.py` | Rows with ANTENNA1 > ANTENNA2, alone or mixed with normal rows: same solutions and corrections as normally ordered data |
+| `test_regression.py` | Same output as `BASELINE_BIN_DIR` for all existing options (byte-identical with `REGRESSION_EXACT=1`, see the module docstring); for fully reversed MSs, solutions and XX/YY match and `.bin` files work across versions |
+| `test_reversed_baselines.py` | MSs with every row ANTENNA1 > ANTENNA2 (e.g. SKA-Low): solutions in main's conjugate convention, all four correlations corrected, leakage solved; mixed row orders are rejected |
 
 ## Test data
 

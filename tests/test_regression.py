@@ -267,3 +267,174 @@ def test_addmodel_identical(
 
     rows = _cross_rows(regression_ms) if datacolumn == "NEW_MODEL" else slice(None)
     assert_visibilities_match(outputs["new"][rows], outputs["old"][rows])
+
+
+# Measurement sets with every row reversed (ANTENNA1 > ANTENNA2, e.g. SKA-Low).
+#
+# calibrate now conjugate-transposes such rows before solving and writes the
+# solutions in the conjugate convention main has always used for them. With
+# diagonal gains and an unpolarised sky, main was already right, so the
+# solutions and parallel hands (XX/YY) must agree with main, and solution files
+# must work across versions. They are compared to rounding (the conjugated data
+# is solved, so they are not byte-identical even with REGRESSION_EXACT).
+# Cross hands are not compared: main corrected them wrongly (see
+# test_reversed_baselines.py).
+
+PARALLEL_HANDS = [0, 3]
+
+
+def _reverse_all_rows(ms_path: Path) -> None:
+    ant1, ant2 = msgen.antennas(ms_path)
+    msgen.reverse_baselines(ms_path, ant1 != ant2)
+
+
+@pytest.fixture(scope="module")
+def reversed_ms(tmp_path_factory, template_ms, template_model) -> Path:
+    """A noise free, diagonal gain MS with one scan per timestep and every row reversed"""
+    out_dir = Path(tmp_path_factory.mktemp("reversed"))
+    ms_path = out_dir / "reversed.ms"
+    msgen.make_calibration_ms(
+        template_ms=template_ms,
+        output_ms=ms_path,
+        model_data=template_model,
+        diagonal=True,
+    )
+    msgen.set_scans_per_timestep(ms_path)
+    _reverse_all_rows(ms_path)
+    return ms_path
+
+
+def _assert_solutions_close(new: Path, old: Path) -> None:
+    assert new.read_bytes()[:HEADER_SIZE] == old.read_bytes()[:HEADER_SIZE]
+    np.testing.assert_allclose(
+        AOSolutions.load(new).bandpass,
+        AOSolutions.load(old).bandpass,
+        rtol=1e-9,
+        atol=1e-12,
+    )
+
+
+def _parallel_hands(ms_path: Path, column: str = "CORRECTED_DATA") -> np.ndarray:
+    ant1, ant2 = msgen.antennas(ms_path)
+    return msgen.get_column(ms_path, column)[ant1 != ant2][..., PARALLEL_HANDS]
+
+
+@pytest.mark.parametrize("case", CALIBRATE_CASES, ids=list(CALIBRATE_CASES))
+def test_reversed_calibrate_solutions_match(
+    case, reversed_ms, bins, baseline_bins, tmpdir
+):
+    """Reversed MS: solutions agree with the reference build for every option"""
+    kwargs = CALIBRATE_CASES[case]
+    tmpdir = Path(tmpdir)
+    new = _calibrate(bins, reversed_ms, tmpdir / "new.bin", **kwargs)
+    old = _calibrate(baseline_bins, reversed_ms, tmpdir / "old.bin", **kwargs)
+
+    _assert_solutions_close(new, old)
+
+
+@pytest.mark.parametrize("case", APPLY_CASES, ids=list(APPLY_CASES))
+@pytest.mark.parametrize("intervals", [False, True], ids=["one_interval", "t1"])
+@pytest.mark.parametrize(
+    "made_by, applied_by",
+    [("old", "new"), ("new", "old")],
+    ids=["old_bin_new_apply", "new_bin_old_apply"],
+)
+def test_reversed_solutions_work_across_versions(
+    made_by, applied_by, case, intervals, reversed_ms, bins, baseline_bins, tmpdir
+):
+    """Reversed MS: a .bin made by one version and applied by the other gives
+    the same XX/YY as the reference build throughout"""
+    if intervals and case == "scan_selection":
+        pytest.skip("main picks the wrong interval here, see test_calibrate.py")
+    versions = {"new": bins, "old": baseline_bins}
+    kwargs = APPLY_CASES[case]
+    tmpdir = Path(tmpdir)
+    sol_path = _calibrate(
+        versions[made_by],
+        reversed_ms,
+        tmpdir / "sols.bin",
+        extra=["-t", "1"] if intervals else [],
+    )
+    reference_path = _calibrate(
+        baseline_bins,
+        reversed_ms,
+        tmpdir / "reference.bin",
+        extra=["-t", "1"] if intervals else [],
+    )
+
+    column = "CORRECTED_DATA" if kwargs.get("copy", True) else "DATA"
+    mixed_ms = _fresh_copy(reversed_ms, tmpdir, "mixed.ms")
+    run(
+        versions[applied_by].applysolutions,
+        applysolutions_args(mixed_ms, sol_path, **kwargs),
+    )
+    reference_ms = _fresh_copy(reversed_ms, tmpdir, "reference.ms")
+    run(
+        baseline_bins.applysolutions,
+        applysolutions_args(reference_ms, reference_path, **kwargs),
+    )
+
+    rows = slice(None)
+    if case == "scan_selection":
+        ant1, ant2 = msgen.antennas(reversed_ms)
+        scans = msgen.get_column(reversed_ms, "SCAN_NUMBER")[ant1 != ant2]
+        rows = scans >= 1
+    np.testing.assert_allclose(
+        _parallel_hands(mixed_ms, column)[rows],
+        _parallel_hands(reference_ms, column)[rows],
+        rtol=1e-5,
+        atol=1e-5,
+    )
+
+
+@pytest.mark.parametrize("correlations", [[0, 3], [0]], ids=["2pol", "1pol"])
+def test_reversed_fewer_polarisations_match(
+    correlations, reversed_ms, bins, baseline_bins, tmpdir
+):
+    """Reversed MS: applying to 2-pol and 1-pol data matches the reference build"""
+    tmpdir = Path(tmpdir)
+    sol_path = _calibrate(baseline_bins, reversed_ms, tmpdir / "sols.bin")
+    reduced = msgen.reshape_ms(
+        reversed_ms, tmpdir / "reduced.ms", correlations=correlations
+    )
+
+    outputs = {}
+    for label, binaries in (("new", bins), ("old", baseline_bins)):
+        ms_path = _fresh_copy(reduced, tmpdir, f"{label}.ms")
+        run(binaries.applysolutions, applysolutions_args(ms_path, sol_path))
+        outputs[label] = msgen.get_column(ms_path, "CORRECTED_DATA")
+
+    cross = _cross_rows(reduced)
+    np.testing.assert_allclose(
+        outputs["new"][cross], outputs["old"][cross], rtol=1e-5, atol=1e-5
+    )
+
+
+def test_reversed_leakage_improves_on_reference(
+    cal_ms_factory, bins, baseline_bins, tmpdir
+):
+    """Reversed MS with 5% leakage: the new build's XX/YY is closer to the truth,
+    and differs from the reference build at about the leakage level.
+
+    Measured: reference error median 0.4% and worst 5% of the peak model
+    amplitude; new build median 0.08% and worst 0.5%.
+    """
+    ms_path, _ = cal_ms_factory(name="leakage")
+    _reverse_all_rows(ms_path)
+    model = _parallel_hands(ms_path, "MODEL_DATA")
+    scale = np.max(np.abs(model))
+    tmpdir = Path(tmpdir)
+
+    errors, corrected = {}, {}
+    for label, binaries in (("new", bins), ("old", baseline_bins)):
+        copy = _fresh_copy(ms_path, tmpdir, f"{label}.ms")
+        sol_path = _calibrate(binaries, copy, tmpdir / f"{label}.bin")
+        run(binaries.applysolutions, applysolutions_args(copy, sol_path))
+        corrected[label] = _parallel_hands(copy)
+        errors[label] = np.abs(corrected[label] - model) / scale
+
+    assert np.median(errors["new"]) < np.median(errors["old"]) / 3
+    assert np.max(errors["new"]) < np.max(errors["old"])
+    difference = np.abs(corrected["new"] - corrected["old"]) / scale
+    assert np.median(difference) < 0.01
+    assert np.max(difference) < 0.1

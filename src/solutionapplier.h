@@ -11,6 +11,7 @@
 #include <tables/Tables/ArrColDesc.h>
 
 #include "banddata.h"
+#include "roworder.h"
 #include "solutionfile.h"
 #include "matrix2x2.h"
 
@@ -112,6 +113,12 @@ public:
             std::cout << "Warning: Found only 2 polarizations - assuming XX/YY only.\n";
         if(polarizationCount == 1)
             std::cout << "Warning: Found only 1 polarization - assuming XX only.\n";
+		// Solutions for a measurement set with every row reversed are stored
+		// conjugated (see roworder.h); undo that so that each row can be
+		// corrected as S_a1 V S_a2^H with its own antennas
+		const bool reversedRows = GetRowOrder(ms) == RowOrder::Reversed;
+		if(reversedRows)
+			std::cout << "All rows have ANTENNA1 > ANTENNA2: solutions are in the conjugate convention for such data\n";
 		
 		std::cout << "Counting timesteps... " << std::flush;
 		double time = -1.0;
@@ -205,6 +212,8 @@ public:
 					for(size_t ch = 0; ch!=channelBlockCount; ++ch) {
 						for(size_t p = 0; p!=4; ++p) {
 							values[a][ch*4+p] = solutionFile.ReadNextSolution();
+							if(reversedRows)
+								values[a][ch*4+p] = std::conj(values[a][ch*4+p]);
 						}
 					}
 				}
@@ -235,7 +244,7 @@ public:
 					casacore::Array<complex_t>::contiter dataPtr = data.cbegin();
 					
 					// A row is corrected as S_a1 V S_a2^H with its own antennas, also
-					// when ANTENNA1 > ANTENNA2 (calibrate conjugates such rows itself)
+					// when ANTENNA1 > ANTENNA2
 					
 					for(size_t ch=0; ch!=channelCount; ++ch)
 					{

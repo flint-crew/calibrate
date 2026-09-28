@@ -92,7 +92,8 @@ def template_model(template_ms) -> np.ndarray:
 def cal_ms_factory(tmpdir, template_ms, template_model):
     """Factory making calibration measurement sets with known Jones matrices.
 
-    Keyword arguments are passed to ``msgen.make_calibration_ms``. Returns the
+    Keyword arguments are passed to ``msgen.make_calibration_ms``;
+    ``model_data`` defaults to the template's MODEL_DATA. Returns the
     path of the new measurement set and its ``Truth``.
     """
     counter = iter(range(1000))
@@ -100,11 +101,9 @@ def cal_ms_factory(tmpdir, template_ms, template_model):
     def _make(name: str | None = None, **kwargs) -> tuple[Path, msgen.Truth]:
         name = name or f"cal{next(counter)}"
         output_ms = Path(tmpdir) / f"{name}.ms"
+        kwargs.setdefault("model_data", template_model)
         truth = msgen.make_calibration_ms(
-            template_ms=template_ms,
-            output_ms=output_ms,
-            model_data=template_model,
-            **kwargs,
+            template_ms=template_ms, output_ms=output_ms, **kwargs
         )
         return output_ms, truth
 
