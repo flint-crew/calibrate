@@ -287,3 +287,71 @@ def test_retry_reproduces_first_attempt(cal_ms_factory, bins, tmpdir):
     assert len(first) > 0, "No channel was retried, the test needs fewer iterations"
     mismatched = {ch: (acc, final[ch]) for ch, acc in first.items() if final[ch] != acc}
     assert mismatched == {}
+
+
+def test_single_channel_ms_gives_finite_solutions(cal_ms_factory, bins, tmpdir):
+    """A one channel MS calibrated against a model file gives usable solutions"""
+    ms_path, _ = cal_ms_factory()
+    single = msgen.reshape_ms(
+        ms_path, Path(tmpdir) / "single.ms", channels=slice(100, 101)
+    )
+    sol_path = Path(tmpdir) / "sols.bin"
+    run(bins.calibrate, calibrate_args(single, sol_path))
+
+    sols = AOSolutions.load(sol_path)
+    assert sols.nchan == 1
+    assert np.all(np.isfinite(sols.bandpass))
+
+
+def test_autocorrelations_are_corrected(cal_ms_factory, bins, tmpdir):
+    """Autocorrelation rows get the same S_a V S_a^H correction as other rows"""
+    ms_path, _ = cal_ms_factory()
+    sol_path = Path(tmpdir) / "sols.bin"
+    run(bins.calibrate, calibrate_args(ms_path, sol_path))
+    run(bins.applysolutions, applysolutions_args(ms_path, sol_path))
+
+    sols = AOSolutions.load(sol_path)
+    ant1, ant2 = msgen.antennas(ms_path)
+    auto = ant1 == ant2
+    data = msgen.get_column(ms_path, "DATA")[auto]
+    corrected = msgen.get_column(ms_path, "CORRECTED_DATA")[auto]
+
+    expected = msgen.apply_solutions(data, sols.bandpass[0], ant1[auto], ant2[auto])
+    np.testing.assert_allclose(corrected, expected, rtol=1e-4, atol=1e-4)
+
+
+def test_scan_selection_uses_matching_interval(cal_ms_factory, bins, tmpdir):
+    """With -startscan the solution intervals line up with calibrate's.
+
+    ``calibrate -startscan 1 -t 1`` on a three scan MS gives two intervals,
+    for scans 1 and 2. applysolutions with the same scan selection must use
+    interval 0 for scan 1 and interval 1 for scan 2.
+    """
+    ms_path, _ = cal_ms_factory()
+    scans = msgen.set_scans_per_timestep(ms_path)
+    before = msgen.get_column(ms_path, "DATA")
+
+    # Interval 0 is the identity, interval 1 doubles every gain (x4 in power)
+    bandpass = np.zeros((2, 36, 288, 4), dtype=np.complex128)
+    bandpass[..., 0] = bandpass[..., 3] = 1.0
+    bandpass[1] *= 2.0
+    sol_path = AOSolutions(
+        path=Path(tmpdir) / "sols.bin",
+        nsol=2,
+        nant=36,
+        nchan=288,
+        npol=4,
+        bandpass=bandpass,
+    ).save(Path(tmpdir) / "sols.bin")
+
+    run(
+        bins.applysolutions,
+        applysolutions_args(ms_path, sol_path, copy=False, extra=["-startscan", "1"]),
+    )
+    after = msgen.get_column(ms_path, "DATA")
+    ant1, ant2 = msgen.antennas(ms_path)
+    cross = ant1 != ant2
+
+    for scan, factor in ((0, 1.0), (1, 1.0), (2, 4.0)):
+        rows = cross & (scans == scan)
+        np.testing.assert_allclose(after[rows], factor * before[rows], rtol=1e-5)

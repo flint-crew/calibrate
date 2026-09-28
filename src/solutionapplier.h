@@ -108,6 +108,10 @@ public:
 		std::vector<size_t> timestepRows;
 		for(size_t rowIndex=0;rowIndex!=ms.nrow();++rowIndex)
 		{
+			// Count timesteps the same way as calibrate, so that solution
+			// intervals line up when a scan range is selected
+			const int scan = scanColumn(rowIndex);
+			if((_startScan == -1 || scan >= _startScan) && (_endScan == -1 || scan <= _endScan))
 			if(timeColumn(rowIndex) != time)
 			{
 				timestepRows.push_back(rowIndex);
@@ -178,10 +182,10 @@ public:
 				intervalRowEnd = timestepRows[intervalTimestepEnd];
     		std::cout << "- TimeStep " << intervalTimestepStart << " to " << intervalTimestepEnd << "\n";
 			std::cout << "  Interval " << (interval+1) << '/' << solutionFile.IntervalCount() << " (" << intervalRowStart << '-' << intervalRowEnd << ")\n";
-			std::cout << "  Antenna1: " << values[1][72*4] << "\n";
+			if(antennaCount > 1)
+				std::cout << "  Antenna1: " << values[1][(channelCount/2)*4] << "\n";
 			for(size_t rowIndex=intervalRowStart; rowIndex!=intervalRowEnd; ++rowIndex)
 			{
-				// Cross correlation?
 				size_t a1 = ant1Column.get(rowIndex);
                 size_t a2 = ant2Column.get(rowIndex);
                 int sn = scanColumn(rowIndex);
@@ -190,7 +194,8 @@ public:
                     continue;
                 if(_endScan != -1 && sn > _endScan)
                     continue;
-				if(a1 != a2) {
+				// Autocorrelations are corrected too (solA == solB)
+				{
 					dataColumn.get(rowIndex, data);
 					casacore::Array<complex_t>::contiter dataPtr = data.cbegin();
 					

@@ -15,8 +15,8 @@ require byte-identical files instead.
 
 The measurement sets here have unit weights, so the weighting fixes are not
 expected to change anything. Autocorrelation rows are left out of the
-applysolutions comparison because the reference build writes stale data into
-them (see ``test_known_issues.py``).
+applysolutions comparison because ``main`` writes stale data into them (see
+``test_calibrate.py::test_autocorrelations_are_corrected``).
 """
 
 from __future__ import annotations
@@ -184,7 +184,7 @@ def test_applysolutions_identical(
     the new applysolutions reads solutions written by the old calibrate.
     """
     if intervals and case == "scan_selection":
-        pytest.skip("Scan selection with several intervals is a known issue")
+        pytest.skip("main picks the wrong interval here, see test_calibrate.py")
     kwargs = APPLY_CASES[case]
     tmpdir = Path(tmpdir)
     sol_path = _calibrate(
@@ -253,7 +253,8 @@ def test_addmodel_identical(
     """addmodel output is identical to the reference build.
 
     Autocorrelations of a newly created column are left out, because the
-    reference build never writes them (see ``test_known_issues.py``).
+    reference build never writes them (see
+    ``test_addmodel.py::test_addmodel_new_column_autocorrelations_are_zero``).
     """
     if datacolumn == "NEW_MODEL" and mode != "c":
         pytest.skip("A new column is only used with copy mode by Flint")

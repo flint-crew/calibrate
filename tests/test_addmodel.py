@@ -45,3 +45,13 @@ def test_addmodel_new_column(cal_ms_factory, bins):
 
     assert predicted.shape == model.shape
     np.testing.assert_array_equal(predicted[cross], model[cross])
+
+
+def test_addmodel_new_column_autocorrelations_are_zero(cal_ms_factory, bins):
+    """A column created by addmodel has zero autocorrelations, not garbage"""
+    ms_path, _ = cal_ms_factory()
+    run(bins.addmodel, addmodel_args(ms_path, datacolumn="NEW_MODEL", mode="c"))
+
+    predicted = msgen.get_column(ms_path, "NEW_MODEL")
+    ant1, ant2 = msgen.antennas(ms_path)
+    np.testing.assert_array_equal(predicted[ant1 == ant2], 0)

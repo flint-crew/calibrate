@@ -10,9 +10,11 @@ int main(int argc, char *argv[])
 	if(argc < 3)
 	{
 		std::cout
-			<< "Usage: calibrate [-p <phases.txt> <gains.txt>] [-refmod <0|1|2> [-minuv <min uvw dist in m>] [-maxuv <min uvw dist in m>] [-startscan <scan>] [-endscan <scan>] [-a <min-accuracy> <stop-accuracy>] [-i <niter>] [-j <threads>] [-m <model>] [-scalar] [-diag] [-rhs <rhs solutions>] [-rotation] [-t timesteps] [-datacolumn <name>] [-weightcolumn <name>] [-quiet] <measurementset.ms> <solutions.bin>\n\n"
+			<< "Usage: calibrate [-p <phases.txt> <gains.txt>] [-refmode <0|1|2>] [-minuv <min uvw dist in m>] [-maxuv <max uvw dist in m>] [-startscan <scan>] [-endscan <scan>] [-a <min-accuracy> <stop-accuracy>] [-i <niter>] [-j <threads>] [-m <model>] [-scalar] [-diag] [-rhs <rhs solutions>] [-rotation] [-t timesteps] [-datacolumn <name>] [-weightcolumn <name>] [-quiet] <measurementset.ms> <solutions.bin>\n\n"
 			<< "This will calculate \"static\" phase offsets for all stations. It produces approximate least-squares solutions.\n"
+			<< "The algorithm is described by Offringa et al. (2016), MNRAS 458, 1057, doi:10.1093/mnras/stw310; please cite it when using this program.\n"
             << "refmode=0 process all baselines; =1 only include baselines to reference antenna; =2 exclude baselines to reference antenna.\n"
+            << "rhs: accepted for compatibility, but has no effect.\n"
             << "weightcolumn: WEIGHT_SPECTRUM, WEIGHT, SIGMA_SPECTRUM or SIGMA (SIGMA columns are used as 1/sigma^2). Default: WEIGHT_SPECTRUM if it has values, otherwise WEIGHT.\n";
 	} else {
 		int argi = 1;

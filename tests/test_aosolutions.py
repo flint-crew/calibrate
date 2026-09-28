@@ -82,3 +82,27 @@ def test_applysolutions_applies_known_bad_solutions(
     cross = ant1 != ant2
     assert np.isnan(corrected[cross]).any()
     assert np.isfinite(corrected[cross]).any()
+
+
+def test_truncated_solutions_file_is_rejected(cal_ms_factory, bins, tmpdir, ao_sols):
+    """applysolutions refuses a solutions file that ends early"""
+    ms_path, _ = cal_ms_factory()
+    truncated = Path(tmpdir) / "truncated.bin"
+    truncated.write_bytes(ao_sols.read_bytes()[:300000])
+
+    result = run(
+        bins.applysolutions, applysolutions_args(ms_path, truncated), check=False
+    )
+    assert result.returncode != 0
+
+
+def test_missing_solutions_file_reports_the_file(cal_ms_factory, bins, tmpdir):
+    """A missing solutions file gives an error naming the problem"""
+    ms_path, _ = cal_ms_factory()
+    missing = Path(tmpdir) / "missing.bin"
+
+    result = run(
+        bins.applysolutions, applysolutions_args(ms_path, missing), check=False
+    )
+    assert result.returncode != 0
+    assert "missing.bin" in result.stderr
