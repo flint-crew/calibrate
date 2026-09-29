@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.10)
 project(calibrate VERSION 1.0.0 LANGUAGES CXX)
 
 # Set C++ standard
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Build type
@@ -91,6 +91,20 @@ target_link_libraries(applysolutions
 install(TARGETS calibrate addmodel applysolutions
     RUNTIME DESTINATION bin
 )
+
+# Python test suite, run with `ctest` (or pytest directly, see tests/README.md).
+# Needs python-casacore, numpy and pytest; skipped if Python is not found.
+enable_testing()
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_FOUND)
+    add_test(NAME pytest
+        COMMAND ${Python3_EXECUTABLE} -m pytest ${CMAKE_SOURCE_DIR}/tests
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    )
+    set_tests_properties(pytest PROPERTIES
+        ENVIRONMENT "CALIBRATE_BIN_DIR=${CMAKE_BINARY_DIR}"
+    )
+endif()
 
 # Print configuration info
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")

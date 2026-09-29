@@ -69,3 +69,8 @@ CMakeUserPresets.json
 build/*
 .DS_Store
 .vscode/launch.json
+
+# Python test suite
+__pycache__/
+.pytest_cache/
+.ruff_cache/

@@ -70,9 +70,12 @@ class SpectralEnergyDistribution {
   long double FluxAtChannel(size_t channelIndex, size_t channelCount,
                             long double startFreq, long double endFreq,
                             aocommon::PolarizationEnum polarization) const {
-    long double freq = startFreq + (long double)channelIndex *
-                                       (endFreq - startFreq) /
-                                       (long double)(channelCount - 1);
+    // With one channel the ramp is undefined (0/0), so use startFreq
+    long double freq =
+        channelCount > 1 ? startFreq + (long double)channelIndex *
+                                           (endFreq - startFreq) /
+                                           (long double)(channelCount - 1)
+                         : startFreq;
     return FluxAtFrequency(freq, polarization);
   }
 

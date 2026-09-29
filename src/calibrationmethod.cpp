@@ -17,7 +17,8 @@ CalibrationMethod::CalibrationMethod(size_t nChannels, size_t nAntenna, size_t n
 	_nTimesteps(nTimesteps),
 	_onlySolveDiag(false),
 	_onlySolveScalar(false),
-	_onlySolveRotation(false)
+	_onlySolveRotation(false),
+	_weightsApplied(false)
 {
 	InitSolutionsToUnity();
 }
@@ -130,12 +131,16 @@ void CalibrationMethod::applyWeightsToData()
 				double &weightSum = *_weightSums.ValuePtr(antenna1, antenna2, 0);
 				for(size_t ch=0; ch!=_nChannels; ++ch)
 				{
+					// The solver minimises sum |s D - J s M J^H|^2 over the
+					// scaled data and model, so scaling by s = sqrt(weight)
+					// weights each residual by the weight itself.
 					const double w = *weightPtr;
+					const double s = std::sqrt(w);
 					weightSum += w;
 					for(size_t p=0; p!=4; ++p)
 					{
-						*dataPtr *= w;
-						*modelPtr *= w;
+						*dataPtr *= s;
+						*modelPtr *= s;
 						++dataPtr;
 						++modelPtr;
 					}
@@ -250,11 +255,17 @@ void CalibrationMethod::Execute(double& precisionLimit, size_t& nIter)
 	bool continueIterating;
 	size_t iterationNumber = 0;
 	
-	_weightSums.SetAll(_nChannels * _nTimesteps);
-	//reportDistances();
-	
-	//std::cout << "Weighting data.\n";
-	applyWeightsToData();
+	// Weights are applied to the data and model once: a retry after
+	// InitSolutionsToUnity() must see the same data as the first attempt.
+	if(!_weightsApplied)
+	{
+		_weightSums.SetAll(_nChannels * _nTimesteps);
+		//reportDistances();
+		
+		//std::cout << "Weighting data.\n";
+		applyWeightsToData();
+		_weightsApplied = true;
+	}
 	
 	double globalChangeSizes[4] = {0.0,0.0,0.0,0.0};
 	double stepsize = 0.25;

@@ -13,7 +13,7 @@
 class SolutionFile
 {
  public:
-  SolutionFile() : _outputStream(0), _inputStream(0)
+  SolutionFile() : _outputStream(0), _inputStream(0), _readPointer(nullptr)
   {
     strcpy(_header.intro, "MWAOCAL");
     _header.fileType = 0; // Complex jones solutions
@@ -50,6 +50,8 @@ class SolutionFile
   {
 		delete _outputStream;
 		_outputStream = new std::ofstream(filename);    
+		if(!*_outputStream)
+			throw std::runtime_error(std::string("Could not open solutions file ") + filename + " for writing");
 		_data.clear();
 		
 		_outputStream->write(reinterpret_cast<const char*>(&_header), sizeof(_header));
@@ -70,13 +72,20 @@ class SolutionFile
 	void OpenForReading(const char *filename)
 	{
 		delete _inputStream;
-		_inputStream = new std::ifstream(filename);
-		if(_inputStream->bad())
-			throw std::runtime_error("Error reading input solutions file");
+		_inputStream = new std::ifstream(filename, std::ios::binary);
+		_filename = filename;
+		if(!_inputStream->is_open() || !*_inputStream)
+			throw std::runtime_error("Could not open solutions file " + _filename);
 		_inputStream->read(reinterpret_cast<char*>(&_header), sizeof(_header));
 		double timeStart, timeEnd;
 		_inputStream->read(reinterpret_cast<char*>(&timeStart), sizeof(timeStart));
 		_inputStream->read(reinterpret_cast<char*>(&timeEnd), sizeof(timeEnd)); 
+		if(!*_inputStream)
+			throw std::runtime_error("Could not read the header of solutions file " + _filename);
+		if(strncmp(_header.intro, "MWAOCAL", 7) != 0)
+			throw std::runtime_error(_filename + " is not a calibrate solutions file (no MWAOCAL header)");
+		if(_header.fileType != 0 || _header.structureType != 0)
+			throw std::runtime_error("Unsupported file or structure type in solutions file " + _filename);
 	}
 
   std::complex<double> ReadNextSolution() {
@@ -89,6 +98,8 @@ class SolutionFile
 		else {
 			std::complex<double> val;
 			_inputStream->read(reinterpret_cast<char*>(&val), sizeof(val));
+			if(!*_inputStream)
+				throw std::runtime_error("Solutions file " + _filename + " is shorter than its header says (truncated?)");
 			return val;
 		}
   }
@@ -118,6 +129,7 @@ class SolutionFile
   std::ifstream *_inputStream;
 	std::vector<std::complex<double> > _data;
 	std::complex<double>* _readPointer;
+	std::string _filename;
 };
 
 #endif

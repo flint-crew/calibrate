@@ -60,6 +60,12 @@ int main(int argc, char **argv)
                 {
                     ms.addColumn(columnDesc, "StandardStMan", false, true);
                 }
+                // Only cross-correlations are predicted, so start from zero
+                // rather than leaving the autocorrelations uninitialised
+                casacore::ArrayColumn<complex_t> newColumn(ms, dataColumnName);
+                casacore::Array<complex_t> zeros(shape, complex_t(0.0, 0.0));
+                for(size_t row=0; row!=ms.nrow(); ++row)
+                    newColumn.put(row, zeros);
                 std::cout << "DONE\n";
             }
         }

@@ -4,6 +4,7 @@
 #include "banddata.h"
 #include "matrix2x2.h"
 #include "progressbar.h"
+#include "roworder.h"
 
 #include "mspredicter.h"
 
@@ -27,6 +28,7 @@ Calibrator::Calibrator(casacore::MeasurementSet& ms, size_t threadCount) :
     _stoppingAccuracy(CalibrationMethod::DefaultStoppingAccuracy()),
     _nIter(1000),
     _solutionInterval(0),
+    _solutionChannels(1),
     _startScan(-1),
     _endScan(-1),
     _threadCount(threadCount),
@@ -39,9 +41,72 @@ Calibrator::Calibrator(casacore::MeasurementSet& ms, size_t threadCount) :
     _savePlotFiles(false),
     _saveFaradayPlotFiles(false),
     _saveCrossTermsPlotFile(false),
-    _verbose(false)
+    _verbose(false),
+    _absMem(0.0),
+    _hasInterval(false),
+    _intervalStart(0),
+    _intervalEnd(0)
 {
     std::cout << "Calibrator::Calibrator minAccuracy:" << _minAccuracy << "; stoppingAccuracy:" << _stoppingAccuracy << "\n";
+}
+
+namespace {
+    /** Replaces each of the four values of a 2x2 matrix by its complex conjugate. */
+    void conjugate(std::complex<double>* values)
+    {
+        for(size_t p=0; p!=4; ++p)
+            values[p] = std::conj(values[p]);
+    }
+
+    /** Replaces the 2x2 matrix (XX, XY, YX, YY) by its conjugate transpose. */
+    template<typename T>
+    void conjugateTranspose(std::complex<T>* values)
+    {
+        const std::complex<T> xy = values[1];
+        values[0] = std::conj(values[0]);
+        values[1] = std::conj(values[2]);
+        values[2] = std::conj(xy);
+        values[3] = std::conj(values[3]);
+    }
+}
+
+casacore::MSMainEnums::PredefinedColumns Calibrator::selectWeightColumn() const
+{
+    const casacore::MSMainEnums::PredefinedColumns candidates[] = {
+        casacore::MSMainEnums::WEIGHT_SPECTRUM,
+        casacore::MSMainEnums::WEIGHT,
+        casacore::MSMainEnums::SIGMA_SPECTRUM,
+        casacore::MSMainEnums::SIGMA
+    };
+    const casacore::TableDesc& tableDesc = _ms.tableDesc();
+    if(!_weightColumnName.empty())
+    {
+        for(casacore::MSMainEnums::PredefinedColumns column : candidates)
+        {
+            const std::string name = _ms.columnName(column);
+            if(name == _weightColumnName)
+            {
+                if(!tableDesc.isColumn(_weightColumnName))
+                    throw std::runtime_error("Weight column " + _weightColumnName + " does not exist");
+                return column;
+            }
+        }
+        throw std::runtime_error("Unsupported weight column " + _weightColumnName +
+            ": use WEIGHT_SPECTRUM, WEIGHT, SIGMA_SPECTRUM or SIGMA");
+    }
+    for(casacore::MSMainEnums::PredefinedColumns column : candidates)
+    {
+        const std::string name = _ms.columnName(column);
+        if(!tableDesc.isColumn(name))
+            continue;
+        // Some writers add a spectrum column without filling it
+        const bool isSpectrum = column == casacore::MSMainEnums::WEIGHT_SPECTRUM ||
+            column == casacore::MSMainEnums::SIGMA_SPECTRUM;
+        if(isSpectrum && !casacore::ROArrayColumn<float>(_ms, name).isDefined(0))
+            continue;
+        return column;
+    }
+    throw std::runtime_error("Measurement set has no WEIGHT or SIGMA column");
 }
 
 void Calibrator::Perform()
@@ -67,33 +132,60 @@ void Calibrator::Perform()
     casacore::ROArrayColumn<bool> flagColumn(_ms, _ms.columnName(casacore::MSMainEnums::FLAG));
     casacore::ROScalarColumn<int> scanColumn(_ms, _ms.columnName(casacore::MSMainEnums::SCAN_NUMBER)); // Check for scan number
     
-    // Use SIGMA_SPECTRUM if available, otherwise use SIGMA
-    casacore::MSMainEnums::PredefinedColumns weight_column = casacore::MSMainEnums::SIGMA_SPECTRUM;
-    if(!_ms.tableDesc().isColumn("SIGMA_SPECTRUM"))
-    {
-        std::cout << "No SIGMA_SPECTRUM column found, using SIGMA instead" << std::endl;
-        weight_column = casacore::MSMainEnums::SIGMA;
-    }
-    else
-    {
-        std::cout << "Using SIGMA_SPECTRUM column for weights" << std::endl;
-    }
+    // Weights come from WEIGHT_SPECTRUM, WEIGHT, SIGMA_SPECTRUM or SIGMA (see
+    // selectWeightColumn()). SIGMA values are converted to weights as 1/sigma^2.
+    const casacore::MSMainEnums::PredefinedColumns weight_column = selectWeightColumn();
+    const bool weightIsSpectrum =
+        weight_column == casacore::MSMainEnums::WEIGHT_SPECTRUM ||
+        weight_column == casacore::MSMainEnums::SIGMA_SPECTRUM;
+    const bool weightIsSigma =
+        weight_column == casacore::MSMainEnums::SIGMA_SPECTRUM ||
+        weight_column == casacore::MSMainEnums::SIGMA;
+    std::cout << "Using " << _ms.columnName(weight_column) << " column for weights"
+        << (weightIsSigma ? " (weight = 1/sigma^2)" : "") << std::endl;
     casacore::ROArrayColumn<float> weightColumn(_ms, _ms.columnName(weight_column));
+    // Rows without a WEIGHT_SPECTRUM (SIGMA_SPECTRUM) cell use WEIGHT (SIGMA)
+    std::unique_ptr<casacore::ROArrayColumn<float>> rowWeightColumn;
+    if(weightIsSpectrum)
+        rowWeightColumn.reset(new casacore::ROArrayColumn<float>(_ms, _ms.columnName(
+            weightIsSigma ? casacore::MSMainEnums::SIGMA : casacore::MSMainEnums::WEIGHT)));
     
-    casacore::IPosition weightShape = weightColumn.shape(0);
     casacore::IPosition dataShape = dataColumn.shape(0);
+    casacore::IPosition weightShape(1, dataShape[0]);
     
     unsigned polarizationCount = dataShape[0];
 
     if(polarizationCount != 4)
         throw std::runtime_error("Pol count in MS != 4");
 
+    // Reversed rows are solved correctly (see the conjugate-transpose below),
+    // but their solutions are written conjugated, as calibrate always has.
+    const bool reversedRows = GetRowOrder(_ms) == RowOrder::Reversed;
+    if(reversedRows)
+        std::cout << "All rows have ANTENNA1 > ANTENNA2: solutions are written in the conjugate convention for such data\n";
+
     if(_verbose)
         std::cout << "DONE\nCounting timesteps... " << std::flush;
     double time = -1.0;
     std::vector<size_t> timestepRows;
+    // With -interval only timesteps [_intervalStart, _intervalEnd) of the MS
+    // are used, and the last row used is the one before timestep _intervalEnd
+    size_t msTimestep = 0, lastRow = _ms.nrow();
+    double msTime = timeColumn(0);
     for(size_t rowIndex=0;rowIndex!=_ms.nrow();++rowIndex)
     {
+        if(timeColumn(rowIndex) != msTime)
+        {
+            ++msTimestep;
+            msTime = timeColumn(rowIndex);
+        }
+        if(_hasInterval && msTimestep < _intervalStart)
+            continue;
+        if(_hasInterval && msTimestep >= _intervalEnd)
+        {
+            lastRow = rowIndex;
+            break;
+        }
         if((_startScan == -1 || scanColumn(rowIndex) >= _startScan) && (_endScan == -1 || scanColumn(rowIndex) <= _endScan))
         if(timeColumn(rowIndex) != time)
         {
@@ -102,7 +194,7 @@ void Calibrator::Perform()
         }
     }
     size_t timestepCount = timestepRows.size();
-    timestepRows.push_back(_ms.nrow());
+    timestepRows.push_back(lastRow);
     size_t intervalCount = (_solutionInterval!=0) ? (timestepCount + _solutionInterval - 1) / _solutionInterval : 1;
     if(_verbose)
      std::cout << "DONE (" << timestepCount << " timesteps, " << intervalCount << " intervals)\n";
@@ -116,7 +208,20 @@ void Calibrator::Perform()
     }
 
     _solutionFile.SetAntennaCount(antennaCount);
-    _solutionFile.SetChannelCount(channelCount);
+    // Channel blocks as in upstream mwa-reduce: -ch N gives channelCount / N
+    // blocks, block cb covering channels [cb*C/B, (cb+1)*C/B)
+    size_t chBlockCount = channelCount / _solutionChannels;
+    if(chBlockCount == 0)
+        chBlockCount = 1;
+    std::vector<size_t> blockOfChannel(channelCount);
+    for(size_t cb=0; cb!=chBlockCount; ++cb)
+    {
+        for(size_t ch=cb*channelCount/chBlockCount; ch!=(cb+1)*channelCount/chBlockCount; ++ch)
+            blockOfChannel[ch] = cb;
+    }
+    if(_verbose && chBlockCount != channelCount)
+        std::cout << "Solving " << chBlockCount << " channel blocks of about " << _solutionChannels << " channels\n";
+    _solutionFile.SetChannelCount(chBlockCount);
     _solutionFile.SetIntervalCount(intervalCount);
     _solutionFile.SetPolarizationCount(4);
     if(_solutionFilename.empty())
@@ -127,6 +232,8 @@ void Calibrator::Perform()
     long int pageCount = sysconf(_SC_PHYS_PAGES);
     long int pageSize = sysconf(_SC_PAGE_SIZE);
     int64_t memSize = (int64_t) pageCount * (int64_t) pageSize;
+    if(_absMem > 0.0)
+        memSize = (int64_t) (_absMem * 1024.0 * 1024.0 * 1024.0);
     double memSizeInGB = (double) memSize / (1024.0*1024.0*1024.0);
     size_t nBaselines = antennaCount * (antennaCount-1) / 2;
     
@@ -145,35 +252,50 @@ void Calibrator::Perform()
         if(_verbose)
         {
             std::cout << "Will use " << _threadCount << " cores.\n";
-            std::cout << "Detected " << round(memSizeInGB*10.0)/10.0 << " GB of system memory.\n";
+            std::cout << (_absMem > 0.0 ? "Using " : "Detected ") << round(memSizeInGB*10.0)/10.0 << " GB of system memory.\n";
             std::cout << "One channel takes " << round(memPerChannel*10.0/(1024*1024))/10.0 << " MB of mem.\n";
         }
-        size_t channelsPerPass = memSize / memPerChannel;
-        if(channelsPerPass > channelCount)
-            channelsPerPass = channelCount;
-        if(channelsPerPass == 0) {
+        // A pass holds whole channel blocks (single channels without -ch)
+        const size_t channelsPerBlock = (channelCount + chBlockCount - 1) / chBlockCount;
+        size_t blocksPerPass = memSize / (memPerChannel * channelsPerBlock);
+        if(blocksPerPass > chBlockCount)
+            blocksPerPass = chBlockCount;
+        if(blocksPerPass == 0) {
             if(_verbose)
                 std::cout << "WARNING: NOT ENOUGH MEMORY FOR EVEN ONE CHANNEL, expect very bad performance.\n";
-            channelsPerPass = 1;
+            blocksPerPass = 1;
         }
-        size_t passCount = (channelCount + channelsPerPass - 1) / channelsPerPass;
+        size_t passCount = (chBlockCount + blocksPerPass - 1) / blocksPerPass;
         if(_verbose)
-            std::cout << "Number of channels that fit in memory: " << channelsPerPass << " (" << passCount << " passes)\n";
+        {
+            if(chBlockCount == channelCount)
+                std::cout << "Number of channels that fit in memory: " << blocksPerPass << " (" << passCount << " passes)\n";
+            else
+                std::cout << "Number of channel blocks that fit in memory: " << blocksPerPass << " (" << passCount << " passes)\n";
+        }
         
         for(size_t pass=0; pass!=passCount; ++pass) {
-            size_t startChannel = (channelCount * pass) / passCount;
-            size_t endChannel = (channelCount * (pass+1)) / passCount;
+            size_t startBlock = (chBlockCount * pass) / passCount;
+            size_t endBlock = (chBlockCount * (pass+1)) / passCount;
+            size_t partBlockCount = endBlock - startBlock;
+            size_t startChannel = startBlock * channelCount / chBlockCount;
+            size_t endChannel = endBlock * channelCount / chBlockCount;
             size_t partChannelCount = endChannel - startChannel;
             std::cout << "pass = " << pass << "; start=" << startChannel << "; end=" << endChannel << "; count=" << partChannelCount << "\n";
             BandData partBandData(bandData, startChannel, endChannel);
 
-            std::vector<CalibrationMethod*> calMethods(partChannelCount);
-            for(size_t ch=0; ch!=partChannelCount; ++ch)
+            // Each block is solved as one channel whose samples are all
+            // timesteps of all its channels: channel c of the block is
+            // stored at timesteps [c*T, (c+1)*T)
+            std::vector<CalibrationMethod*> calMethods(partBlockCount);
+            for(size_t b=0; b!=partBlockCount; ++b)
             {
-                calMethods[ch] = new CalibrationMethod(1, antennaCount, timestepsInInterval);
-                calMethods[ch]->SetOnlySolveScalar(_onlyScalar);
-                calMethods[ch]->SetOnlySolveDiag(_onlyDiag);
-                calMethods[ch]->SetOnlySolveRotation(_onlyRotation);
+                const size_t cb = b + startBlock;
+                const size_t blockChannels = (cb+1)*channelCount/chBlockCount - cb*channelCount/chBlockCount;
+                calMethods[b] = new CalibrationMethod(1, antennaCount, timestepsInInterval * blockChannels);
+                calMethods[b]->SetOnlySolveScalar(_onlyScalar);
+                calMethods[b]->SetOnlySolveDiag(_onlyDiag);
+                calMethods[b]->SetOnlySolveRotation(_onlyRotation);
             }
             std::unique_ptr<MSPredicter> predicter;
 			std::unique_ptr<ProgressBar> progress;
@@ -191,6 +313,8 @@ void Calibrator::Perform()
             predicter->SetEndRow(intervalRowEnd);
             predicter->SetStartScan(_startScan);
             predicter->SetEndScan(_endScan);
+            // Only predict the channels of this pass
+            predicter->SetChannelRange(startChannel, endChannel);
 
             std::vector<std::complex<double> > modelValues(4 * channelCount);
             casacore::Array<complex_t> data(dataShape);
@@ -227,14 +351,17 @@ void Calibrator::Perform()
                 {
                     boost::mutex::scoped_lock lock(predicter->IOMutex());
                     dataColumn.get(rowIndex, data);
-                    // If using SIGMA_SPECTRUM then have a weight per channel
-                    if(weight_column == casacore::MSMainEnums::SIGMA_SPECTRUM)
+                    // A spectrum column has a weight per channel
+                    if(weightIsSpectrum && weightColumn.isDefined(rowIndex))
                         weightColumn.get(rowIndex, weights);
                     else
                     {
-                        // If using SIGMA then have to copy weight across for each channel.
+                        // Otherwise copy the per polarization weight across each channel.
                         casacore::Array<float> vweights(weightShape);
-                        weightColumn.get(rowIndex, vweights);
+                        if(weightIsSpectrum)
+                            rowWeightColumn->get(rowIndex, vweights);
+                        else
+                            weightColumn.get(rowIndex, vweights);
                         float *weightscPtr = weights.cbegin();
                         float *vweightsPtr = vweights.cbegin();
                         for(size_t ch = 0; ch!=partChannelCount; ++ch)
@@ -253,6 +380,15 @@ void Calibrator::Perform()
                     float *weightsPtr = weights.cbegin();
                     bool *flagPtr = flags.cbegin();
 
+                    for(size_t i = startChannel * 4; i != endChannel * 4; ++i)
+                    {
+                        float &weight = weightsPtr[i];
+                        if(!std::isfinite(weight) || weight <= 0.0)
+                            weight = 0.0;
+                        else if(weightIsSigma)
+                            weight = 1.0 / (weight * weight);
+                    }
+
                     double u = rowData.u;
                     double v = rowData.v;
                     double w = rowData.w;
@@ -265,6 +401,12 @@ void Calibrator::Perform()
                     else
                         notSelected++;
 
+                    // The solver stores each baseline once, as (lower antenna,
+                    // higher antenna). A row stored the other way round holds
+                    // V_21 = V_12^H, so turn its data and model into V_12.
+                    const bool reversed = antenna1 > antenna2;
+                    const size_t lowAntenna = reversed ? antenna2 : antenna1;
+                    const size_t highAntenna = reversed ? antenna1 : antenna2;
                     for(size_t ch = 0; ch!=partChannelCount; ++ch)
                     {
                         size_t chIndex = (ch + startChannel) * 4;
@@ -282,7 +424,15 @@ void Calibrator::Perform()
                                 weightsPtr[chIndex+3] = 0.0;
                             }
                         }
-                        calMethods[ch]->AddData(&dataPtr[chIndex], &weightsPtr[chIndex], &modelValues[chIndex], antenna1, antenna2, rowData.timeIndex);
+                        if(reversed)
+                        {
+                            conjugateTranspose(&dataPtr[chIndex]);
+                            conjugateTranspose(&modelValues[chIndex]);
+                            std::swap(weightsPtr[chIndex+1], weightsPtr[chIndex+2]);
+                        }
+                        const size_t cb = blockOfChannel[ch + startChannel];
+                        const size_t channelInBlock = ch + startChannel - cb*channelCount/chBlockCount;
+                        calMethods[cb - startBlock]->AddData(&dataPtr[chIndex], &weightsPtr[chIndex], &modelValues[chIndex], lowAntenna, highAntenna, channelInBlock * timestepsInInterval + rowData.timeIndex);
                     }
                 }
                 
@@ -292,8 +442,8 @@ void Calibrator::Perform()
                 std::cout << "DONE (" << selectedCount<< "/" << (selectedCount+notSelected) << " rows selected)\nCalibrating...\n";
         
             std::queue<size_t> tasks;
-            for(size_t ch=0; ch!=partChannelCount; ++ch)
-                tasks.push(ch);
+            for(size_t b=0; b!=partBlockCount; ++b)
+                tasks.push(b);
             boost::thread_group threadGroup;
             boost::mutex mutex;
             for(size_t i=0; i!=_threadCount; ++i)
@@ -312,16 +462,18 @@ void Calibrator::Perform()
             // Save solutions
             for(size_t ant=0; ant!=antennaCount; ++ant)
             {
-                for(size_t ch=0; ch!=partChannelCount; ++ch)
+                for(size_t ch=0; ch!=partBlockCount; ++ch)
                 {
                     std::complex<double> val[4];
                     for(size_t p=0; p!=4; ++p)
                         val[p] = calMethods[ch]->JonesSolution(ant, 0, p);
                     Matrix2x2::Invert(val);
+                    if(reversedRows)
+                        conjugate(val);
                     
                     for(size_t p=0; p!=4; ++p)
                     {
-                        _solutionFile.WriteSolution(val[p], intervalIndex, ant, ch+startChannel, p);
+                        _solutionFile.WriteSolution(val[p], intervalIndex, ant, ch+startBlock, p);
                     }
                 }
             }
@@ -329,13 +481,13 @@ void Calibrator::Perform()
             if(_savePlotFiles)
             {
                 std::ofstream phasePlotStream(_phasePlotFilename.c_str()), gainPlotStream(_gainPlotFilename.c_str());
-                phasePlotStream << antennaCount << ' ' << partChannelCount << " 4\n";
-                gainPlotStream << antennaCount << ' ' << partChannelCount << " 4\n";
+                phasePlotStream << antennaCount << ' ' << partBlockCount << " 4\n";
+                gainPlotStream << antennaCount << ' ' << partBlockCount << " 4\n";
                 
-                for(size_t ch=0; ch!=partChannelCount; ++ch)
+                for(size_t ch=0; ch!=partBlockCount; ++ch)
                 {
-                    phasePlotStream << (ch+startChannel) << '\t';
-                    gainPlotStream << (ch+startChannel) << '\t';
+                    phasePlotStream << (ch+startBlock) << '\t';
+                    gainPlotStream << (ch+startBlock) << '\t';
                     
                     for(size_t p=0; p!=4; ++p)
                     {
@@ -345,6 +497,8 @@ void Calibrator::Perform()
                             for(size_t p2=0; p2!=4; ++p2)
                                 val[p2] = calMethods[ch]->JonesSolution(ant, 0, p2);
                             Matrix2x2::Invert(val);
+                            if(reversedRows)
+                                conjugate(val);
                     
                             double s1, s2;
                             Matrix2x2::SingularValues(val, s1, s2);
@@ -366,15 +520,17 @@ void Calibrator::Perform()
             {
                 std::ofstream faradayPlotStream(_faradayPlotFilename.c_str());
                 
-                for(size_t ch=0; ch!=partChannelCount; ++ch)
+                for(size_t ch=0; ch!=partBlockCount; ++ch)
                 {
-                    faradayPlotStream << (ch+startChannel) << '\t';
+                    faradayPlotStream << (ch+startBlock) << '\t';
                     
                     for(size_t ant=0; ant!=antennaCount; ++ant)
                     {
                         std::complex<double> val[4];
                         for(size_t p=0; p!=4; ++p)
                             val[p] = calMethods[ch]->JonesSolution(ant, 0, p);
+                        if(reversedRows)
+                            conjugate(val);
                 
                         faradayPlotStream << '\t' << -Matrix2x2::RotationAngle(val);
                     }
@@ -386,9 +542,9 @@ void Calibrator::Perform()
             {
                 std::ofstream crossTermPlotStream(_crossTermsPlotFilename.c_str());
                 
-                for(size_t ch=0; ch!=partChannelCount; ++ch)
+                for(size_t ch=0; ch!=partBlockCount; ++ch)
                 {
-                    crossTermPlotStream << (ch+startChannel) << '\t';
+                    crossTermPlotStream << (ch+startBlock) << '\t';
                     
                     for(size_t ant=0; ant!=antennaCount; ++ant)
                     {
@@ -403,7 +559,7 @@ void Calibrator::Perform()
                 }
             }
             
-            for(size_t ch=0; ch!=partChannelCount; ++ch)
+            for(size_t ch=0; ch!=partBlockCount; ++ch)
                 delete calMethods[ch];
         }
     }

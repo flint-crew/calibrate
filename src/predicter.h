@@ -5,7 +5,6 @@
 #include <vector>
 #include <cmath>
 
-#include "aocommon/threadpool.h"
 
 class Predicter
 {
@@ -50,7 +49,6 @@ class Predicter
 		NumType _ra0, _dec0, _startFrequency, _endFrequency;
 		size_t _channelCount;
 		CNumType _totalFlux[4];
-		ThreadPool _threads;
 };
 
 #endif

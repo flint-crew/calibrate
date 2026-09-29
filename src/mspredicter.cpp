@@ -5,8 +5,16 @@
 
 MSPredicter::~MSPredicter()
 {
-//    if(_readThread != 0)
-//        _readThread->join();
+    if(_readThread)
+    {
+        // The reading and predicting threads use the buffers, so let them
+        // finish first. If the caller stopped reading rows early, pass the
+        // remaining rows through so the threads can not block.
+        RowData rowData;
+        while(_outputLane.read(rowData))
+            _availableBufferLane.write(rowData);
+        _readThread->join();
+    }
     clearBuffers();
 }
 

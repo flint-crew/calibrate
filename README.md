@@ -1,5 +1,7 @@
 # Calibrate
 
+[![CI](https://github.com/flint-crew/calibrate/actions/workflows/ci.yml/badge.svg)](https://github.com/flint-crew/calibrate/actions/workflows/ci.yml)
+
 Forked from [André Offringa's MWA data reduction code](https://github.com/ICRAR/mwa-reduce).
 
 If any of this code is used, please cite [Offringa et al. (2016)](https://doi.org/10.1093/mnras/stw310).
@@ -18,7 +20,7 @@ The copied files do not all come from the same upstream version: `calibrator.cpp
 
 ### Prerequisites
 
-- **C++ compiler** (g++ recommended)
+- **C++17 compiler** (g++ recommended)
 - **CASA (Common Astronomy Software Applications)** libraries
 - **GSL (GNU Scientific Library)**
 - **Boost libraries**
@@ -64,7 +66,7 @@ make
 
 - **CASA libraries not found**: Use `-DCMAKE_PREFIX_PATH=/path/to/casacore`
 - **GSL/Boost not found**: Install via package manager (`apt-get`, `brew`, etc.)
-- **Build errors**: Ensure casacore version 3.6+ is installed
+- **Build errors**: Ensure casacore is installed; CI builds against Ubuntu's `casacore-dev` (3.5) and conda-forge's casacore (3.8)
 
 ## Usage
 
@@ -72,25 +74,35 @@ These tools perform "MitchCal":
 
 > a direction-independent full-polarization self-calibration. This is performed with the mitchcal tool, which is the authors’ custom implementation of the algorithm described by Mitchell et al. (2008)
 
-In the current form of this repo, only a single time-step, frequency dependent solution is computed. This is suitable for a bandpass calibration.
+By default a single time-step, frequency dependent solution is computed, which is suitable for a bandpass calibration. `-t` gives one solution per group of timesteps and `-ch` one solution per block of channels.
+
+Visibilities are weighted by WEIGHT_SPECTRUM if it is filled, otherwise by WEIGHT; SIGMA_SPECTRUM and SIGMA (as 1/sigma^2) are used only when there is no WEIGHT column. `-weightcolumn` selects a column explicitly.
 
 The CLI hooks are:
 
 ```bash
 calibrate
-# Usage: calibrate [-p <phases.txt> <gains.txt>] [-refmod <0|1|2> [-minuv <min uvw dist in m>] [-maxuv <min uvw dist in m>] [-startscan <scan>] [-endscan <scan>] [-a <min-accuracy> <stop-accuracy>] [-i <niter>] [-j <threads>] [-m <model>] [-scalar] [-diag] [-rhs <rhs solutions>] [-rotation] [-t timesteps] [-datacolumn <name>] [-quiet] <measurementset.ms> <solutions.bin>
-
+# Usage: calibrate [-p <phases.txt> <gains.txt>] [-refmode <0|1|2>] [-minuv <min uvw dist in m>] [-maxuv <max uvw dist in m>] [-startscan <scan>] [-endscan <scan>] [-a <min-accuracy> <stop-accuracy>] [-i <niter>] [-j <threads>] [-m <model>] [-scalar] [-diag] [-rhs <rhs solutions>] [-rotation] [-t timesteps] [-ch <channels per solution>] [-interval <start timestep> <end timestep>] [-absmem <memory in GB>] [-datacolumn <name>] [-weightcolumn <name>] [-quiet] <measurementset.ms> <solutions.bin>
+#
 # This will calculate "static" phase offsets for all stations. It produces approximate least-squares solutions.
+# The algorithm is described by Offringa et al. (2016), MNRAS 458, 1057, doi:10.1093/mnras/stw310; please cite it when using this program.
 # refmode=0 process all baselines; =1 only include baselines to reference antenna; =2 exclude baselines to reference antenna.
+# rhs: accepted for compatibility, but has no effect.
+# ch: solve one solution per block of this many channels (default 1: every channel).
+# interval: only use timesteps start to end-1 of the measurement set (counting from 0).
+# absmem: memory to plan for in GB, instead of the machine's physical memory.
+# weightcolumn: WEIGHT_SPECTRUM, WEIGHT, SIGMA_SPECTRUM or SIGMA (SIGMA columns are used as 1/sigma^2). Default: WEIGHT_SPECTRUM if it has values, otherwise WEIGHT.
 ```
 
 ```bash
 applysolutions
-# Usage: applysolutions [-datacolumn <name>] [-gflag <solutions-flag-file.txt>] [-startscan <scan>] [-endscan <scan>] [-copy/-nocopy] [-s xx xy yx yy] <ms> <gains-bin-file>
+# Usage: applysolutions [-datacolumn <name>] [-gflag <solutions-flag-file.txt>] [-startscan <scan>] [-endscan <scan>] [-interval <start timestep> <end timestep>] [-copy/-nocopy] [-s xx xy yx yy] <ms> <gains-bin-file>
 # Will apply the found solution matrices.
 # Options:
 #   -copy/-nocopy Don't(/do) alter the original DATA column but store the corrected data in the CORRECTED_DATA (this is std CASA behaviour)
 #     default: -copy
+#   -interval Only correct timesteps start to end-1 (counting from 0), as calibrate -interval
+# Solutions for blocks of channels (calibrate -ch) are applied to every channel of their block.
 ```
 
 ```bash
@@ -98,3 +110,18 @@ addmodel
 # Usage: addmodel [-usemodelcol] [-datacolumn <COLUMN>] [-m <a|s|c|z>] [-n <σ>] <model> <ms>
 # Modify visibilities using a model. If -usemodelcol is specified then the MODEL_DATA column is used as the source model otherwise the specified component model file is used. The modification to use is defined with the mode switch(-m) where a=add model to visibilities (default), s=subtract model from visibilities, c=copy model to visibilities, z=zero visibilities.
 ```
+## Testing
+
+The `tests/` directory holds a pytest suite that runs the built programs on
+small measurement sets with known Jones matrices, using Flint's test data and
+command lines. It needs `python-casacore>=3.6`, `numpy>=2` and `pytest`:
+
+```bash
+pip install "python-casacore>=3.6" "numpy>=2" pytest
+pytest                                   # uses ./build, or $PATH
+CALIBRATE_BIN_DIR=/path/to/build pytest  # a specific build
+```
+
+Setting `BASELINE_BIN_DIR` to a build of `main` also runs the regression tests,
+which check that every existing option still gives byte-identical output. See
+[`tests/README.md`](tests/README.md) for details.

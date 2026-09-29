@@ -77,6 +77,12 @@ public:
 	
 	void SetStartRow(size_t startRow) { _startRow = startRow; }
 	void SetEndRow(size_t endRow) { _endRow = endRow; }
+	/** Only predict channels [start, end); the default is all channels. */
+	void SetChannelRange(size_t startChannel, size_t endChannel)
+	{
+		_startChannel = startChannel;
+		_endChannel = endChannel;
+	}
 	void SetStartScan(int startScan) { _startScan = startScan; }
 	void SetEndScan(int endScan) { _endScan = endScan; }
 private:

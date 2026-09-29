@@ -63,6 +63,7 @@ class CalibrationMethod
 		aocommon::UVector<std::complex<double> > _jonesSolutions;
 		size_t _nChannels, _nAntenna, _nTimesteps;
 		bool _onlySolveDiag, _onlySolveScalar, _onlySolveRotation;
+		bool _weightsApplied;
 		
 };
 
