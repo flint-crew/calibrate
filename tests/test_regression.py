@@ -410,31 +410,29 @@ def test_reversed_fewer_polarisations_match(
     )
 
 
-def test_reversed_leakage_improves_on_reference(
+def test_reversed_leakage_close_to_reference(
     cal_ms_factory, bins, baseline_bins, tmpdir
 ):
-    """Reversed MS with 5% leakage: the new build's XX/YY is closer to the truth,
-    and differs from the reference build at about the leakage level.
+    """Reversed MS with 5% leakage: XX/YY differs from the reference build by at
+    most about the leakage level.
 
-    Measured: reference error median 0.4% and worst 5% of the peak model
-    amplitude; new build median 0.08% and worst 0.5%.
+    Before reversed rows were solved correctly the reference differed by a
+    median of 0.4% and at worst 5% of the peak model amplitude; against a
+    reference that has the fix the difference is only rounding. How close each
+    build gets to the truth is checked in test_reversed_baselines.py.
     """
     ms_path, _ = cal_ms_factory(name="leakage")
     _reverse_all_rows(ms_path)
-    model = _parallel_hands(ms_path, "MODEL_DATA")
-    scale = np.max(np.abs(model))
+    scale = np.max(np.abs(_parallel_hands(ms_path, "MODEL_DATA")))
     tmpdir = Path(tmpdir)
 
-    errors, corrected = {}, {}
+    corrected = {}
     for label, binaries in (("new", bins), ("old", baseline_bins)):
         copy = _fresh_copy(ms_path, tmpdir, f"{label}.ms")
         sol_path = _calibrate(binaries, copy, tmpdir / f"{label}.bin")
         run(binaries.applysolutions, applysolutions_args(copy, sol_path))
         corrected[label] = _parallel_hands(copy)
-        errors[label] = np.abs(corrected[label] - model) / scale
 
-    assert np.median(errors["new"]) < np.median(errors["old"]) / 3
-    assert np.max(errors["new"]) < np.max(errors["old"])
     difference = np.abs(corrected["new"] - corrected["old"]) / scale
     assert np.median(difference) < 0.01
     assert np.max(difference) < 0.1

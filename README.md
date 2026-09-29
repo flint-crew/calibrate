@@ -1,5 +1,7 @@
 # Calibrate
 
+[![CI](https://github.com/flint-crew/calibrate/actions/workflows/ci.yml/badge.svg)](https://github.com/flint-crew/calibrate/actions/workflows/ci.yml)
+
 Forked from [André Offringa's MWA data reduction code](https://github.com/ICRAR/mwa-reduce).
 
 If any of this code is used, please cite [Offringa et al. (2016)](https://doi.org/10.1093/mnras/stw310).
@@ -18,7 +20,7 @@ The copied files do not all come from the same upstream version: `calibrator.cpp
 
 ### Prerequisites
 
-- **C++ compiler** (g++ recommended)
+- **C++17 compiler** (g++ recommended)
 - **CASA (Common Astronomy Software Applications)** libraries
 - **GSL (GNU Scientific Library)**
 - **Boost libraries**
@@ -64,7 +66,7 @@ make
 
 - **CASA libraries not found**: Use `-DCMAKE_PREFIX_PATH=/path/to/casacore`
 - **GSL/Boost not found**: Install via package manager (`apt-get`, `brew`, etc.)
-- **Build errors**: Ensure casacore version 3.6+ is installed
+- **Build errors**: Ensure casacore is installed; CI builds against Ubuntu's `casacore-dev` (3.5) and conda-forge's casacore (3.8)
 
 ## Usage
 

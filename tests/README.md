@@ -29,6 +29,11 @@ CALIBRATE_BIN_DIR=/path/to/build pytest
 
 `ctest` in the build directory runs the same suite against that build.
 
+CI (`.github/workflows/ci.yml`) runs the suite on every pull request:
+- against Ubuntu's casacore, with the regression tests comparing against a build of `main`;
+- against conda-forge's casacore 3.8;
+- and it builds the Flint container from `flint-crew/flint-containers`.
+
 ### Comparing with a reference build
 
 `test_regression.py` compares every output byte for byte with another build.
