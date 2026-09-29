@@ -86,16 +86,17 @@ jobs:
       - uses: mamba-org/setup-micromamba@v2
         with:
           environment-name: calibrate
+          # Passed to micromamba as is, without a shell: no quotes
           create-args: >-
             python=3.12
-            "casacore>=3.8"
+            casacore>=3.8
             gsl
             libboost-devel
             cmake
             make
             cxx-compiler
-            "python-casacore>=3.6"
-            "numpy>=2"
+            python-casacore>=3.6
+            numpy>=2
             pytest
           cache-environment: true
 
