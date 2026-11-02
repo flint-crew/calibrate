@@ -60,10 +60,14 @@ jobs:
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
           cmake --build build -j
 
-      # The regression tests compare every output with a build of main
+      # The regression tests compare every output with a build of main.
+      # Older versions of main hard-code -march=native, which lets the compiler
+      # use FMA and changes rounding; remove it so both builds use the same
+      # instructions (a no-op once main no longer has it).
       - name: Build main as the reference
         run: |
           git worktree add ../reference origin/main
+          sed -i 's/-march=native//' ../reference/CMakeLists.txt
           cmake -S ../reference -B ../reference-build -DCMAKE_BUILD_TYPE=Release
           cmake --build ../reference-build -j
 

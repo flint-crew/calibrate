@@ -1,9 +1,5 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.12)
 project(calibrate VERSION 1.0.0 LANGUAGES CXX)
-
-# Set C++ standard
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Build type
 if(NOT CMAKE_BUILD_TYPE)
@@ -12,7 +8,15 @@ endif()
 
 # Compiler flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -O3")
-set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG -march=native")
+set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG")
+
+# Optional CPU to optimise for, e.g. -DTARGET_CPU=native or x86-64-v3.
+# Empty (the default) builds for the compiler's default target, so the
+# programs run on any machine of that architecture.
+set(TARGET_CPU "" CACHE STRING "Value for -march (empty: compiler default)")
+if(TARGET_CPU)
+    add_compile_options(-march=${TARGET_CPU})
+endif()
 
 # Casacore has a separate CMake file in this directory
 set(CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/CMake)
@@ -23,6 +27,20 @@ find_package(Casacore 3.6 REQUIRED COMPONENTS casa ms tables measures)
 if(NOT CASACORE_FOUND)
     message(FATAL_ERROR "Casacore not found. Please install casacore or specify its location with -DCMAKE_PREFIX_PATH=/path/to/casacore")
 endif()
+
+# C++ standard. casacore after 3.8.1 needs C++20 (its String.h uses
+# std::string::starts_with), while casacore before 3.6, such as Ubuntu 24.04's
+# 3.5, does not compile as C++20 (it uses std::allocator members that C++20
+# removed). Use C++20 unless an older casacore was found; override with
+# -DCMAKE_CXX_STANDARD=17 or 20.
+if(NOT DEFINED CMAKE_CXX_STANDARD)
+    if(CASACORE_VERSION AND CASACORE_VERSION VERSION_LESS 3.6)
+        set(CMAKE_CXX_STANDARD 17)
+    else()
+        set(CMAKE_CXX_STANDARD 20)
+    endif()
+endif()
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Find other required libraries
 find_library(GSL_LIBRARY gsl)
@@ -109,7 +127,9 @@ endif()
 # Print configuration info
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "C++ compiler: ${CMAKE_CXX_COMPILER}")
+message(STATUS "C++ standard: ${CMAKE_CXX_STANDARD}")
 message(STATUS "C++ flags: ${CMAKE_CXX_FLAGS}")
+message(STATUS "Target CPU: ${TARGET_CPU}")
 message(STATUS "Casacore include dirs: ${CASACORE_INCLUDE_DIRS}")
 message(STATUS "Casacore libraries: ${CASACORE_LIBRARIES}")
 message(STATUS "Install prefix: ${CMAKE_INSTALL_PREFIX}")
