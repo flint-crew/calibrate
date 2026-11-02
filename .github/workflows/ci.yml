@@ -133,10 +133,12 @@ jobs:
 
       - uses: docker/setup-buildx-action@v4
 
+      # --allow=fs.read lets bake read this checkout, which is outside the
+      # flint-containers directory; buildx's entitlement check refuses it otherwise
       - name: Build
         working-directory: flint-containers
         run: |
-          docker buildx bake calibrate --load \
+          docker buildx bake calibrate --load --allow=fs.read=../calibrate \
             --set calibrate.contexts.calibrate-src=../calibrate \
             --set calibrate.tags=calibrate-test
 
@@ -144,7 +146,9 @@ jobs:
       # installed programs. Reuses the build stages from the step above.
       - name: Test in the image
         working-directory: flint-containers
-        run: docker buildx bake calibrate-test --set calibrate-test.contexts.calibrate-src=../calibrate
+        run: |
+          docker buildx bake calibrate-test --allow=fs.read=../calibrate \
+            --set calibrate-test.contexts.calibrate-src=../calibrate
 
       - name: Run the programs
         run: |
