@@ -20,7 +20,7 @@ The copied files do not all come from the same upstream version: `calibrator.cpp
 
 ### Prerequisites
 
-- **C++17 compiler** (g++ recommended)
+- **C++20 compiler** (g++ 10 or newer recommended); C++17 is enough with casacore older than 3.6
 - **CASA (Common Astronomy Software Applications)** libraries
 - **GSL (GNU Scientific Library)**
 - **Boost libraries**
@@ -39,6 +39,19 @@ make
 # Install (optional)
 sudo make install
 ```
+
+### Optimising for a CPU
+
+By default the programs are built for the compiler's default target, so they
+run on any machine of that architecture. To optimise for a particular CPU, set
+`TARGET_CPU`, which is passed to the compiler as `-march`:
+
+```bash
+cmake ../ -DTARGET_CPU=native      # only runs on CPUs like the build machine
+cmake ../ -DTARGET_CPU=x86-64-v3   # any x86-64 CPU with AVX2
+```
+
+Other compiler flags can be given with `-DCMAKE_CXX_FLAGS=...`.
 
 ### Custom Casacore Location
 

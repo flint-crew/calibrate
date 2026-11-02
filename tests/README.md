@@ -48,6 +48,12 @@ BASELINE_BIN_DIR=../build-main CALIBRATE_BIN_DIR=build pytest
 Run it before merging a change: existing options must keep giving identical
 solutions and corrected data.
 
+Build both versions with the same CPU flags. Versions of `main` from before
+`TARGET_CPU` was added hard-code `-march=native`. Remove that from the
+reference's `CMakeLists.txt` (as CI does), or build this version with
+`-DTARGET_CPU=native`. Otherwise FMA instructions change the rounding and the
+comparison fails.
+
 ## What is tested
 
 | File | Checks |

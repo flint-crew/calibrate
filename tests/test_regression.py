@@ -7,9 +7,10 @@ change can not break the pipeline.
 
 By default values must agree to within rounding (relative 1e-10 for the
 double precision solutions, 1e-6 for float visibilities) and NaNs must be in
-the same places. The build uses ``-march=native``, which lets the compiler
-fuse multiply-adds differently whenever a file changes, so bit-for-bit output
-is only reproducible with contraction turned off. Build both versions with
+the same places. The compiler may fuse multiply-adds differently whenever a
+file changes (more so when built with ``-DTARGET_CPU=...``, which can enable
+FMA instructions), so bit-for-bit output is only reproducible with
+contraction turned off. Build both versions with
 ``-DCMAKE_CXX_FLAGS=-ffp-contract=off`` and set ``REGRESSION_EXACT=1`` to
 require byte-identical files instead.
 
