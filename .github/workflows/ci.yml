@@ -121,6 +121,9 @@ jobs:
     env:
       # flint-containers branch to build with
       FLINT_CONTAINERS_REF: main
+      # Read the build cache flint-containers' CI writes, so casacore and the
+      # other shared stages aren't rebuilt (read-only: CACHE_PUSH stays false)
+      CACHE_REF: ghcr.io/flint-crew/flint-containers-cache
     steps:
       # flint-containers builds the published image from this repo through the
       # calibrate-src context in docker-bake.hcl; point it at this checkout
